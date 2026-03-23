@@ -3,6 +3,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { Send, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 
 interface ChatInputProps {
   onSubmit: (question: string) => void;
@@ -19,8 +20,18 @@ export function ChatInput({
   prefillValue,
   prefillKey,
 }: ChatInputProps) {
+  // Derive initial value from prefillKey — each new key resets to prefillValue
   const [value, setValue] = useState('');
+  const [appliedPrefillKey, setAppliedPrefillKey] = useState(prefillKey);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // When prefillKey changes, sync the prefill value into local state
+  if (prefillKey !== appliedPrefillKey) {
+    setAppliedPrefillKey(prefillKey);
+    if (prefillValue !== undefined && prefillValue !== '') {
+      setValue(prefillValue);
+    }
+  }
 
   const handleSubmit = useCallback(() => {
     const trimmed = value.trim();
@@ -47,21 +58,13 @@ export function ChatInput({
     ta.style.height = Math.min(ta.scrollHeight, 200) + 'px';
   }, [value]);
 
-  // Focus on mount
+  // Focus on mount and when prefill changes
   useEffect(() => {
     textareaRef.current?.focus();
-  }, []);
-
-  // External prefill from sidebar
-  useEffect(() => {
-    if (prefillValue !== undefined && prefillValue !== '') {
-      setValue(prefillValue);
-      textareaRef.current?.focus();
-    }
-  }, [prefillValue, prefillKey]);
+  }, [appliedPrefillKey]);
 
   return (
-    <div className="flex items-end gap-2 rounded-xl border border-border bg-card p-3 shadow-sm">
+    <div className="flex items-end gap-2.5 rounded-xl border border-border bg-card p-3 shadow-sm transition-shadow focus-within:shadow-md focus-within:border-primary/30">
       <textarea
         ref={textareaRef}
         value={value}
@@ -70,20 +73,22 @@ export function ChatInput({
         placeholder={placeholder}
         disabled={isLoading}
         rows={1}
-        className="flex-1 resize-none bg-transparent text-sm text-foreground placeholder:text-muted-foreground focus:outline-none disabled:opacity-50"
+        className="flex-1 resize-none bg-transparent text-[0.9rem] leading-relaxed text-foreground placeholder:text-muted-foreground/70 focus:outline-none disabled:opacity-50"
       />
-      <Button
-        size="icon"
-        onClick={handleSubmit}
-        disabled={!value.trim() || isLoading}
-        className="h-8 w-8 shrink-0"
-      >
-        {isLoading ? (
-          <Loader2 className="h-4 w-4 animate-spin" />
-        ) : (
-          <Send className="h-4 w-4" />
-        )}
-      </Button>
+      <Tooltip>
+        <TooltipTrigger
+          render={<Button size="icon" className="h-8 w-8 shrink-0" />}
+          onClick={handleSubmit}
+          disabled={!value.trim() || isLoading}
+        >
+          {isLoading ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <Send className="h-4 w-4" />
+          )}
+        </TooltipTrigger>
+        <TooltipContent>Send (⌘+Enter)</TooltipContent>
+      </Tooltip>
     </div>
   );
 }

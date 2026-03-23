@@ -13,11 +13,15 @@ import { loadSession, saveSession, generateCellId } from '@/lib/session';
 import { detectChartType } from '@/lib/chart-detector';
 import { SchemaExplorer } from '@/components/schema-explorer';
 import { QueryLibrary } from '@/components/query-library';
-import { Database, Trash2, Loader2, Sparkles, Play, Search, CheckCircle2, PanelLeft, PanelLeftClose, Menu, ArrowDown } from 'lucide-react';
+import { Database, Trash2, Loader2, Sparkles, Play, Search, CheckCircle2, PanelLeft, PanelLeftClose, Menu, ArrowDown, Sun, Moon, Keyboard } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { ErrorBoundary } from '@/components/error-boundary';
+import { useTheme } from 'next-themes';
 import { cn } from '@/lib/utils';
 
 type AgentPhase =
@@ -67,11 +71,16 @@ export default function Home() {
   const [prefillValue, setPrefillValue] = useState('');
   const [prefillKey, setPrefillKey] = useState(0);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
+  const [mounted, setMounted] = useState(false);
+  const { theme, setTheme } = useTheme();
   const scrollRef = useRef<HTMLDivElement>(null);
   const initialized = useRef(false);
   const cellsRef = useRef(cells);
   cellsRef.current = cells;
   const isNearBottomRef = useRef(true);
+
+  // Avoid hydration mismatch for theme
+  useEffect(() => setMounted(true), []);
 
   // Load session on mount
   useEffect(() => {
@@ -576,6 +585,7 @@ export default function Home() {
   );
 
   return (
+    <TooltipProvider delay={300}>
     <div className="flex h-screen">
       {/* Desktop sidebar */}
       <aside
@@ -598,62 +608,122 @@ export default function Home() {
       {/* Main content */}
       <div className="flex flex-1 flex-col min-w-0">
         {/* Header */}
-        <header className="flex items-center justify-between border-b border-border px-4 py-2">
-          <div className="flex items-center gap-2">
+        <header className="flex items-center justify-between border-b border-border bg-card/50 backdrop-blur-sm px-4 py-2.5 sticky top-0 z-20">
+          <div className="flex items-center gap-2.5">
             {/* Mobile hamburger */}
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8 md:hidden"
-              onClick={() => setMobileSheetOpen(true)}
-            >
-              <Menu className="h-4 w-4" />
-            </Button>
+            <Tooltip>
+              <TooltipTrigger
+                render={<Button variant="ghost" size="icon" className="h-8 w-8 md:hidden" />}
+                onClick={() => setMobileSheetOpen(true)}
+              >
+                <Menu className="h-4 w-4" />
+              </TooltipTrigger>
+              <TooltipContent>Open sidebar</TooltipContent>
+            </Tooltip>
             {/* Desktop sidebar toggle */}
-            <Button
-              variant="ghost"
-              size="icon"
-              className="hidden md:inline-flex h-8 w-8"
-              onClick={() => setSidebarOpen((o) => !o)}
-            >
-              {sidebarOpen ? (
-                <PanelLeftClose className="h-4 w-4" />
-              ) : (
-                <PanelLeft className="h-4 w-4" />
-              )}
-            </Button>
-            <Database className="h-5 w-5 text-primary" />
-            <h1 className="text-lg font-semibold">Lakehouse Analytics</h1>
+            <Tooltip>
+              <TooltipTrigger
+                render={<Button variant="ghost" size="icon" className="hidden md:inline-flex h-8 w-8" />}
+                onClick={() => setSidebarOpen((o) => !o)}
+              >
+                {sidebarOpen ? (
+                  <PanelLeftClose className="h-4 w-4" />
+                ) : (
+                  <PanelLeft className="h-4 w-4" />
+                )}
+              </TooltipTrigger>
+              <TooltipContent>{sidebarOpen ? 'Close sidebar' : 'Open sidebar'}</TooltipContent>
+            </Tooltip>
+            <div className="flex items-center gap-2">
+              <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary/10">
+                <Database className="h-4 w-4 text-primary" />
+              </div>
+              <h1 className="text-base font-semibold tracking-tight">Lakehouse Analytics</h1>
+            </div>
           </div>
-          {cells.length > 0 && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={handleClearSession}
-              className="text-xs text-muted-foreground"
-            >
-              <Trash2 className="mr-1 h-3 w-3" />
-              Clear
-            </Button>
-          )}
+          <div className="flex items-center gap-0.5">
+            {/* Keyboard shortcuts help */}
+            <Dialog>
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <DialogTrigger
+                      render={<Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground" />}
+                    />
+                  }
+                >
+                  <Keyboard className="h-4 w-4" />
+                </TooltipTrigger>
+                <TooltipContent>Keyboard shortcuts</TooltipContent>
+              </Tooltip>
+              <DialogContent className="sm:max-w-sm">
+                <DialogHeader>
+                  <DialogTitle>Keyboard Shortcuts</DialogTitle>
+                </DialogHeader>
+                <div className="space-y-3 text-sm">
+                  {[
+                    { keys: '⌘ + Enter', desc: 'Submit question' },
+                    { keys: '⌘ + E', desc: 'Run SQL query' },
+                    { keys: 'Escape', desc: 'Cancel SQL editing' },
+                  ].map((s) => (
+                    <div key={s.keys} className="flex items-center justify-between">
+                      <span className="text-muted-foreground">{s.desc}</span>
+                      <kbd className="rounded-md border border-border bg-muted/50 px-2 py-0.5 font-mono text-xs">{s.keys}</kbd>
+                    </div>
+                  ))}
+                </div>
+              </DialogContent>
+            </Dialog>
+
+            {/* Theme toggle */}
+            <Tooltip>
+              <TooltipTrigger
+                render={<Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground" />}
+                onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+              >
+                {mounted && theme === 'dark' ? (
+                  <Sun className="h-4 w-4" />
+                ) : (
+                  <Moon className="h-4 w-4" />
+                )}
+              </TooltipTrigger>
+              <TooltipContent>Toggle theme</TooltipContent>
+            </Tooltip>
+
+            {/* Clear session */}
+            {cells.length > 0 && (
+              <Tooltip>
+                <TooltipTrigger
+                  render={<Button variant="ghost" size="sm" className="h-8 gap-1.5 text-xs text-muted-foreground hover:text-foreground" />}
+                  onClick={handleClearSession}
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  Clear
+                </TooltipTrigger>
+                <TooltipContent>Clear session</TooltipContent>
+              </Tooltip>
+            )}
+          </div>
         </header>
 
         {/* Notebook cells */}
+        <ErrorBoundary>
         <div className="relative flex-1 overflow-hidden">
         <div ref={scrollRef} className="h-full overflow-y-auto">
-        <div className="mx-auto max-w-4xl space-y-4 p-4 pb-32">
+        <div className="mx-auto max-w-4xl space-y-5 p-6 pb-32">
           {cells.length === 0 && (
-            <div className="flex flex-col items-center justify-center py-24 text-center">
-              <Database className="mb-4 h-12 w-12 text-muted-foreground/30" />
-              <h2 className="text-xl font-semibold text-foreground">
-                Welcome to Lakehouse Analytics
+            <div className="flex flex-col items-center justify-center py-20 text-center">
+              <div className="mb-6 flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10">
+                <Database className="h-8 w-8 text-primary" />
+              </div>
+              <h2 className="text-2xl font-bold tracking-tight text-foreground">
+                Lakehouse Analytics
               </h2>
-              <p className="mt-2 max-w-md text-sm text-muted-foreground">
+              <p className="mt-3 max-w-lg text-[0.9rem] leading-relaxed text-muted-foreground">
                 Ask questions about your data in plain English. I&apos;ll generate
-                SQL, run it against your Trino lakehouse, validate the results,
-                and provide an analysis.
+                SQL, run it against your Trino lakehouse, and analyze the results.
               </p>
-              <div className="mt-6 flex flex-wrap justify-center gap-2">
+              <div className="mt-8 flex flex-wrap justify-center gap-2.5">
                 {[
                   'Show me the top 10 customers by lifetime value',
                   'What is the daily revenue trend this quarter?',
@@ -662,7 +732,7 @@ export default function Home() {
                   <button
                     key={q}
                     onClick={() => streamAgentResponse(q)}
-                    className="rounded-full border border-border px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:border-primary hover:text-foreground"
+                    className="rounded-full border border-border bg-card px-4 py-2 text-[0.8rem] text-muted-foreground shadow-sm transition-all hover:border-primary/50 hover:text-foreground hover:shadow-md"
                   >
                     {q}
                   </button>
@@ -681,10 +751,10 @@ export default function Home() {
               <div key={cell.id}>
                 {cell.type === 'question' && (
                   <div className="flex items-start gap-3">
-                    <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-medium text-primary-foreground">
+                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-foreground shadow-sm">
                       Q
                     </div>
-                    <p className="pt-1 text-sm text-foreground">
+                    <p className="pt-1.5 text-[0.9rem] font-medium leading-relaxed text-foreground">
                       {cell.content}
                     </p>
                   </div>
@@ -716,7 +786,7 @@ export default function Home() {
                   cell.metadata?.results && (
                     <div className="space-y-3">
                       <div className="flex items-center gap-2 px-1">
-                        <span className="text-xs text-muted-foreground">
+                        <span className="text-[0.8rem] text-muted-foreground">
                           {cell.metadata.results.rowCount} rows returned
                           {cell.metadata.results.executionTimeMs > 0 &&
                             ` in ${cell.metadata.results.executionTimeMs}ms`}
@@ -744,7 +814,7 @@ export default function Home() {
                 )}
 
                 {cell.type === 'error' && (
-                  <div className="rounded-lg border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+                  <div className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-[0.85rem] text-destructive">
                     {cell.content}
                   </div>
                 )}
@@ -754,28 +824,28 @@ export default function Home() {
 
           {/* Streaming SQL preview — shows while SQL is being generated token-by-token */}
           {streamingSQL && agentPhase === 'generating' && (
-            <div className="rounded-lg border border-border bg-zinc-950 overflow-hidden">
-              <div className="flex items-center gap-2 border-b border-white/10 px-3 py-1.5">
-                <Loader2 className="h-3 w-3 animate-spin text-blue-400" />
+            <div className="rounded-xl border border-border bg-zinc-950 overflow-hidden shadow-sm">
+              <div className="flex items-center gap-2 border-b border-white/10 px-4 py-2">
+                <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
                 <span className="text-xs font-medium text-zinc-400">Writing SQL...</span>
               </div>
-              <pre className="p-4 text-sm text-zinc-300 font-mono whitespace-pre-wrap overflow-x-auto">
+              <pre className="p-4 text-[0.8rem] leading-relaxed text-zinc-300 font-mono whitespace-pre-wrap overflow-x-auto">
                 {streamingSQL}
-                <span className="inline-block w-1.5 h-4 bg-blue-400 animate-pulse ml-0.5 align-text-bottom" />
+                <span className="inline-block w-1.5 h-4 bg-primary animate-pulse ml-0.5 align-text-bottom" />
               </pre>
             </div>
           )}
 
           {/* Inline status indicator — visible in the main content area */}
           {isLoading && agentPhase !== 'idle' && !streamingSQL && (
-            <div className="flex items-center gap-2.5 rounded-lg border border-border/50 bg-muted/20 px-4 py-3">
+            <div className="flex items-center gap-3 rounded-xl border border-border/50 bg-card/80 backdrop-blur-sm px-4 py-3 shadow-sm">
               {(() => {
                 const config = phaseConfig[agentPhase];
                 const Icon = config.icon;
                 return (
                   <>
                     <Icon className={`h-4 w-4 ${agentPhase === 'executing' || agentPhase === 'retrying' ? 'animate-spin' : 'animate-pulse'} ${config.color}`} />
-                    <span className="text-sm text-muted-foreground">
+                    <span className="text-[0.85rem] text-muted-foreground">
                       {config.text}
                     </span>
                   </>
@@ -790,16 +860,17 @@ export default function Home() {
         {showScrollToBottom && (
           <button
             onClick={scrollToBottom}
-            className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10 flex items-center gap-1.5 rounded-full border border-border bg-background/90 px-3 py-1.5 text-xs text-muted-foreground shadow-md backdrop-blur transition-colors hover:text-foreground hover:border-primary"
+            className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10 flex items-center gap-1.5 rounded-full border border-border bg-card/95 px-3.5 py-2 text-xs font-medium text-muted-foreground shadow-lg backdrop-blur-sm transition-all hover:text-foreground hover:border-primary hover:shadow-xl"
           >
-            <ArrowDown className="h-3 w-3" />
+            <ArrowDown className="h-3.5 w-3.5" />
             Scroll to bottom
           </button>
         )}
       </div>
+        </ErrorBoundary>
 
         {/* Input pinned at bottom */}
-        <div className="border-t border-border bg-background p-4">
+        <div className="border-t border-border bg-card/50 backdrop-blur-sm p-4">
           <div className="mx-auto max-w-4xl">
             <ChatInput
               onSubmit={streamAgentResponse}
@@ -811,5 +882,6 @@ export default function Home() {
         </div>
       </div>
     </div>
+    </TooltipProvider>
   );
 }

@@ -46,7 +46,7 @@ export function ThinkingStep({
 
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
-      <CollapsibleTrigger className="flex w-full items-center gap-2 rounded-lg border border-border/50 bg-muted/30 px-3 py-2 text-left text-xs text-muted-foreground transition-colors hover:bg-muted/50">
+      <CollapsibleTrigger className="flex w-full items-center gap-2 rounded-xl border border-border/50 bg-muted/30 px-3.5 py-2.5 text-left text-xs text-muted-foreground transition-colors hover:bg-muted/50">
         <ChevronRight
           className={`h-3 w-3 shrink-0 transition-transform ${open ? 'rotate-90' : ''}`}
         />

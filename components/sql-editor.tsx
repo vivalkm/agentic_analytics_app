@@ -5,6 +5,7 @@ import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { Play, Copy, Check, Pencil, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 
 interface SQLEditorProps {
   sql: string;
@@ -60,39 +61,42 @@ export function SQLEditor({
   }, []);
 
   return (
-    <div className="group relative rounded-lg border border-border bg-zinc-950 overflow-hidden">
+    <div className="group relative rounded-xl border border-border bg-zinc-950 overflow-hidden shadow-sm">
       {/* Toolbar */}
-      <div className="flex items-center justify-between border-b border-white/10 px-3 py-1.5">
+      <div className="flex items-center justify-between border-b border-white/10 px-4 py-2">
         <span className="text-xs font-medium text-zinc-400">SQL</span>
         <div className="flex items-center gap-1">
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-6 w-6 text-zinc-400 hover:text-white"
-            onClick={handleCopy}
-          >
-            {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
-          </Button>
+          <Tooltip>
+            <TooltipTrigger
+              render={<Button variant="ghost" size="icon" className="h-6 w-6 text-zinc-400 hover:text-white" />}
+              onClick={handleCopy}
+            >
+              {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+            </TooltipTrigger>
+            <TooltipContent>{copied ? 'Copied!' : 'Copy SQL'}</TooltipContent>
+          </Tooltip>
           {!streaming && (
             <>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-6 w-6 text-zinc-400 hover:text-white"
-                onClick={editing ? () => { setEditing(false); setEditValue(sql); } : startEditing}
-              >
-                {editing ? <X className="h-3 w-3" /> : <Pencil className="h-3 w-3" />}
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-6 gap-1 px-2 text-xs text-zinc-400 hover:text-white"
-                onClick={handleExecute}
-                disabled={isExecuting}
-              >
-                <Play className="h-3 w-3" />
-                {isExecuting ? 'Running...' : 'Run (⌘E)'}
-              </Button>
+              <Tooltip>
+                <TooltipTrigger
+                  render={<Button variant="ghost" size="icon" className="h-6 w-6 text-zinc-400 hover:text-white" />}
+                  onClick={editing ? () => { setEditing(false); setEditValue(sql); } : startEditing}
+                >
+                  {editing ? <X className="h-3 w-3" /> : <Pencil className="h-3 w-3" />}
+                </TooltipTrigger>
+                <TooltipContent>{editing ? 'Cancel edit' : 'Edit SQL'}</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger
+                  render={<Button variant="ghost" size="sm" className="h-6 gap-1 px-2 text-xs text-zinc-400 hover:text-white" />}
+                  onClick={handleExecute}
+                  disabled={isExecuting}
+                >
+                  <Play className="h-3 w-3" />
+                  {isExecuting ? 'Running...' : 'Run (⌘E)'}
+                </TooltipTrigger>
+                <TooltipContent>Run query (⌘E)</TooltipContent>
+              </Tooltip>
             </>
           )}
         </div>

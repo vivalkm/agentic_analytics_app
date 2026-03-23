@@ -1,5 +1,22 @@
 import Anthropic from '@anthropic-ai/sdk';
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import { TableMetadata, QueryResult, QueryLibraryEntry, ValidationResult, ConversationTurn } from './types';
+
+/** Load domain context file (cached after first read). */
+let _domainContext: string | null = null;
+function getDomainContext(): string {
+  if (_domainContext !== null) return _domainContext;
+  try {
+    _domainContext = readFileSync(
+      join(process.cwd(), 'domain-context.md'),
+      'utf-8'
+    ).trim();
+  } catch {
+    _domainContext = '';
+  }
+  return _domainContext;
+}
 
 const getClient = () =>
   new Anthropic({
@@ -142,8 +159,10 @@ export async function generateSQL(
           .join('\n\n')
       : '';
 
+  const domain = getDomainContext();
   const systemPrompt =
     SQL_SYSTEM_PROMPT +
+    (domain ? `\n\n${domain}` : '') +
     '\n\nAvailable tables and their schemas:\n' +
     tableContext +
     queryContext;
@@ -234,8 +253,10 @@ export async function fixSQL(
   relevantTables: TableMetadata[]
 ): Promise<ReadableStream> {
   const tableContext = buildTableContext(relevantTables);
+  const domain = getDomainContext();
   const systemPrompt =
     SQL_SYSTEM_PROMPT +
+    (domain ? `\n\n${domain}` : '') +
     '\n\nAvailable tables and their schemas:\n' +
     tableContext;
 
@@ -365,8 +386,10 @@ export async function generateRevisedSQL(
         buildTableContext(unusedTables)
       : '';
 
+  const domain = getDomainContext();
   const systemPrompt =
     SQL_SYSTEM_PROMPT +
+    (domain ? `\n\n${domain}` : '') +
     '\n\nAvailable tables and their schemas:\n' +
     tableContext +
     queryContext +
@@ -457,11 +480,14 @@ ${sql}
 Available tables:
 ${tableContext}`;
 
+  const domain = getDomainContext();
+  const systemPrompt = SQL_REVIEW_SYSTEM_PROMPT + (domain ? `\n\n${domain}` : '');
+
   const client = getClient();
   const response = await client.messages.create({
     model: getModel(),
     max_tokens: 2048,
-    system: SQL_REVIEW_SYSTEM_PROMPT,
+    system: systemPrompt,
     messages: [{ role: 'user', content: userContent }],
   });
 

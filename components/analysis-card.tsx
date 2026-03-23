@@ -150,10 +150,10 @@ export function AnalysisCard({
   const followUps = streaming ? [] : parseFollowUps(analysis);
 
   return (
-    <Card className="border-border bg-card">
+    <Card className="border-border bg-card shadow-sm">
       <CardHeader className="pb-2">
-        <CardTitle className="flex items-center gap-2 text-sm font-medium">
-          <Sparkles className="h-4 w-4 text-amber-500" />
+        <CardTitle className="flex items-center gap-2 text-[0.85rem] font-semibold">
+          <Sparkles className="h-4 w-4 text-primary" />
           Analysis
           {streaming && (
             <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
@@ -167,7 +167,7 @@ export function AnalysisCard({
       </CardHeader>
       <CardContent>
         <div
-          className="prose prose-sm prose-invert max-w-none text-sm leading-relaxed text-foreground"
+          className="prose prose-sm prose-invert max-w-none text-[0.85rem] leading-relaxed text-foreground"
           dangerouslySetInnerHTML={{ __html: renderMarkdown(analysis) }}
         />
 

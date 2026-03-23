@@ -132,7 +132,7 @@ export function ChartRenderer({ config, results }: ChartRendererProps) {
   const showLegend = isGrouped || config.yKeys.length > 1;
 
   return (
-    <div className="rounded-lg border border-border bg-card p-4">
+    <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
       {config.title && (
         <p className="mb-3 text-xs font-medium text-muted-foreground">
           {config.title}

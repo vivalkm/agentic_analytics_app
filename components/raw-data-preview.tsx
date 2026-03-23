@@ -35,7 +35,7 @@ export function RawDataPreview({ results, maxRows = 10 }: RawDataPreviewProps) {
 
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
-      <CollapsibleTrigger className="flex w-full items-center gap-2 rounded-lg border border-border/50 bg-muted/20 px-3 py-2 text-left text-xs text-muted-foreground transition-colors hover:bg-muted/40">
+      <CollapsibleTrigger className="flex w-full items-center gap-2 rounded-xl border border-border/50 bg-muted/20 px-3.5 py-2.5 text-left text-xs text-muted-foreground transition-colors hover:bg-muted/40">
         <ChevronRight
           className={`h-3 w-3 shrink-0 transition-transform ${open ? 'rotate-90' : ''}`}
         />
@@ -45,7 +45,7 @@ export function RawDataPreview({ results, maxRows = 10 }: RawDataPreviewProps) {
         </span>
       </CollapsibleTrigger>
       <CollapsibleContent>
-        <div className="mt-2 overflow-x-auto rounded-lg border border-border">
+        <div className="mt-2 overflow-x-auto rounded-xl border border-border shadow-sm">
           <table className="w-full text-xs">
             <thead>
               <tr className="border-b border-border bg-muted/30">
