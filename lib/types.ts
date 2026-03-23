@@ -46,6 +46,8 @@ export interface ChartConfig {
   type: 'bar' | 'line' | 'pie' | 'none';
   xKey: string;
   yKeys: string[];
+  /** Secondary categorical column used to group/color bars (e.g. region, month) */
+  groupKey?: string;
   title?: string;
 }
 
@@ -72,7 +74,7 @@ export type AgentEvent =
   | { type: 'execution'; iteration: number; rowCount: number; columns: string[]; columnTypes: string[]; rows: Record<string, unknown>[]; executionTimeMs: number }
   | { type: 'validation'; iteration: number; valid: boolean; reason: string; suggestion?: string }
   | { type: 'analysis_chunk'; delta: string }
-  | { type: 'done'; iterations: number; finalIteration: number }
+  | { type: 'done'; iterations: number; finalIteration: number; chartConfig?: ChartConfig }
   | { type: 'error'; content: string; iteration?: number };
 
 export interface ValidationResult {

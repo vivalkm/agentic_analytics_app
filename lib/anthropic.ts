@@ -28,7 +28,23 @@ const ANALYSIS_SYSTEM_PROMPT = `You are a data analyst. Given the SQL query, the
 3. Any notable outliers or patterns
 4. 2-3 suggested follow-up questions the user might want to explore
 
-Be concise and business-focused. Use specific numbers from the results. Format with markdown.`;
+Be concise and business-focused. Use specific numbers from the results. Format with markdown.
+
+IMPORTANT — Chart recommendation:
+At the very end of your response, you MUST include a chart configuration block. This tells the UI how to visualize the data. Use this exact format:
+
+\`\`\`chart
+{"type": "<bar|line|pie|none>", "xKey": "<column_name>", "yKeys": ["<column_name>"], "groupKey": "<column_name_or_null>", "title": "<short chart title>"}
+\`\`\`
+
+Rules for chart config:
+- type: "line" for time series trends, "bar" for comparisons/categories, "pie" for proportions (2-8 slices), "none" if data is not suitable for charting
+- xKey: the column for the x-axis (dates, categories, labels)
+- yKeys: array of column names for the values to plot. Only include columns directly relevant to the question. Do NOT include every numeric column — exclude counts, margins, or metrics the user didn't ask about.
+- groupKey: if the data has a secondary categorical dimension (e.g. region, product, segment) that should be shown as different colored bars/lines, set this to that column name. This pivots the data so each unique value of groupKey becomes a separate colored series. Set to null if no grouping is needed.
+- title: a short descriptive title for the chart
+- Use EXACT column names from the query results (case-sensitive)
+- The chart block MUST be the very last thing in your response`;
 
 const VALIDATION_SYSTEM_PROMPT = `You are a data quality validator. Given a user's question, query results, and available tables, determine if the results adequately answer the question.
 
@@ -46,6 +62,42 @@ Respond with ONLY a valid JSON object, no other text:
 
 If the results look correct, set valid=true and explain why in reason.
 If there's an issue, set valid=false, explain the problem in reason, and in suggestion name SPECIFIC alternative tables from the available list that might have the missing data.`;
+
+/**
+ * Parse a chart config block from the analysis text.
+ * Returns the parsed ChartConfig and the analysis text with the block removed.
+ */
+export function parseChartConfigFromAnalysis(
+  analysisText: string
+): { chartConfig: import('./types').ChartConfig | null; cleanedText: string } {
+  const match = analysisText.match(/```chart\s*\n?([\s\S]*?)```/);
+  if (!match) {
+    return { chartConfig: null, cleanedText: analysisText };
+  }
+
+  const cleanedText = analysisText.replace(/```chart\s*\n?[\s\S]*?```/, '').trimEnd();
+
+  try {
+    const parsed = JSON.parse(match[1].trim());
+    const validTypes = ['bar', 'line', 'pie', 'none'];
+    if (!validTypes.includes(parsed.type)) {
+      return { chartConfig: null, cleanedText };
+    }
+
+    return {
+      chartConfig: {
+        type: parsed.type,
+        xKey: String(parsed.xKey || ''),
+        yKeys: Array.isArray(parsed.yKeys) ? parsed.yKeys.map(String) : [],
+        groupKey: parsed.groupKey && parsed.groupKey !== 'null' ? String(parsed.groupKey) : undefined,
+        title: parsed.title ? String(parsed.title) : undefined,
+      },
+      cleanedText,
+    };
+  } catch {
+    return { chartConfig: null, cleanedText };
+  }
+}
 
 export function buildTableContext(tables: TableMetadata[]): string {
   return tables

@@ -143,15 +143,80 @@ export function detectChartType(result: QueryResult, question?: string): ChartCo
     });
   }
 
+  // --- Helper: detect if a column looks like a grouping dimension ---
+  const isGroupingCol = (colIdx: number): boolean => {
+    const col = columns[colIdx].toLowerCase();
+    const groupPatterns = [
+      'region', 'category', 'segment', 'channel', 'type', 'group',
+      'country', 'state', 'city', 'department', 'team', 'brand',
+      'product', 'status', 'tier', 'source', 'medium',
+    ];
+    return groupPatterns.some((p) => col.includes(p));
+  };
+
+  const isTimeAxisCol = (colIdx: number): boolean => {
+    const col = columns[colIdx].toLowerCase();
+    return (
+      col.includes('month') || col.includes('quarter') || col.includes('year') ||
+      col.includes('week') || col.includes('period') || col.includes('day') ||
+      col.includes('date')
+    );
+  };
+
+  // --- Helper: pick best xKey and groupKey from categorical columns ---
+  const pickAxisAndGroup = (catIndices: number[]): { xIdx: number; groupIdx?: number } => {
+    if (catIndices.length < 2) return { xIdx: catIndices[0] };
+
+    // Prefer time-like columns for xAxis, grouping-like for groupKey
+    const timeIdx = catIndices.find(isTimeAxisCol);
+    const groupIdx = catIndices.find(isGroupingCol);
+
+    if (timeIdx !== undefined && groupIdx !== undefined && timeIdx !== groupIdx) {
+      return { xIdx: timeIdx, groupIdx };
+    }
+
+    // If we have 2 categorical cols, check which has fewer unique values (better for grouping)
+    const uniqueCounts = catIndices.map((i) => ({
+      idx: i,
+      unique: new Set(rows.map((r) => r[columns[i]])).size,
+    }));
+
+    // The one with MORE unique values is the axis, fewer is the group
+    uniqueCounts.sort((a, b) => b.unique - a.unique);
+    const xCandidate = uniqueCounts[0];
+    const groupCandidate = uniqueCounts[1];
+
+    // Only use groupKey if group has 2-12 unique values (sensible for legend)
+    if (groupCandidate && groupCandidate.unique >= 2 && groupCandidate.unique <= 12) {
+      return { xIdx: xCandidate.idx, groupIdx: groupCandidate.idx };
+    }
+
+    return { xIdx: catIndices[0] };
+  };
+
   // --- 1. Line chart: date/time column + numeric, enough data points for a series ---
   if (dateCols.length >= 1 && numericCols.length >= 1 && rows.length > 3) {
     const relevantCols = filterRelevantColumns(numericCols, columns, question || '', 2);
     const yKeys = relevantCols.map((i) => columns[i]);
+
+    // Check for grouping dimension (e.g. date + region + revenue)
+    let groupKey: string | undefined;
+    if (categoricalCols.length >= 1 && numericCols.length === 1) {
+      const groupIdx = categoricalCols.find(isGroupingCol) ?? categoricalCols[0];
+      const uniqueGroups = new Set(rows.map((r) => r[columns[groupIdx]])).size;
+      if (uniqueGroups >= 2 && uniqueGroups <= 12) {
+        groupKey = columns[groupIdx];
+      }
+    }
+
     return {
-      type: 'line',
+      type: groupKey ? 'bar' : 'line',
       xKey: columns[dateCols[0]],
       yKeys,
-      title: `${yKeys.join(', ')} over time`,
+      groupKey,
+      title: groupKey
+        ? `${yKeys.join(', ')} by ${groupKey} over time`
+        : `${yKeys.join(', ')} over time`,
     };
   }
 
@@ -167,7 +232,24 @@ export function detectChartType(result: QueryResult, question?: string): ChartCo
     };
   }
 
-  // --- 3. Bar chart: categorical + numeric (general case) ---
+  // --- 3. Grouped bar: 2+ categorical cols + numeric → group by secondary dimension ---
+  if (categoricalCols.length >= 2 && numericCols.length >= 1 && rows.length >= 2) {
+    const relevantCols = filterRelevantColumns(numericCols, columns, question || '', 1);
+    const yKeys = relevantCols.map((i) => columns[i]);
+    const { xIdx, groupIdx } = pickAxisAndGroup(categoricalCols);
+
+    return {
+      type: 'bar',
+      xKey: columns[xIdx],
+      yKeys,
+      groupKey: groupIdx !== undefined ? columns[groupIdx] : undefined,
+      title: groupIdx !== undefined
+        ? `${yKeys.join(', ')} by ${columns[xIdx]} and ${columns[groupIdx]}`
+        : `${yKeys.join(', ')} by ${columns[xIdx]}`,
+    };
+  }
+
+  // --- 4. Bar chart: single categorical + numeric (general case) ---
   if (categoricalCols.length >= 1 && numericCols.length >= 1 && rows.length >= 2) {
     const relevantCols = filterRelevantColumns(numericCols, columns, question || '', 3);
     const yKeys = relevantCols.map((i) => columns[i]);
@@ -179,7 +261,7 @@ export function detectChartType(result: QueryResult, question?: string): ChartCo
     };
   }
 
-  // --- 4. Pie chart: only when 2-8 categories with a single metric ---
+  // --- 5. Pie chart: only when 2-8 categories with a single metric ---
   if (
     categoricalCols.length >= 1 &&
     numericCols.length === 1 &&
@@ -198,7 +280,7 @@ export function detectChartType(result: QueryResult, question?: string): ChartCo
     }
   }
 
-  // --- 5. Line chart fallback: multiple numeric cols, no categories ---
+  // --- 6. Line chart fallback: multiple numeric cols, no categories ---
   if (numericCols.length >= 2) {
     const relevantCols = filterRelevantColumns(
       numericCols.filter((i) => i !== 0), columns, question || '', 3

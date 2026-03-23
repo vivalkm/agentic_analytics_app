@@ -7,6 +7,7 @@ import {
   generateRevisedSQL,
   buildTableContext,
   checkDateCompleteness,
+  parseChartConfigFromAnalysis,
 } from './anthropic';
 import { findRelevantTables, ensureMetadataLoading } from './metadata';
 import { matchQueries, loadQueryLibrary, getQueryLibrary } from './query-matcher';
@@ -506,6 +507,8 @@ export function runAgentLoop(question: string): ReadableStream {
         }
 
         // --- Stream analysis ---
+        let llmChartConfig: import('./types').ChartConfig | undefined;
+
         if (currentResults && currentResults.rowCount > 0) {
           try {
             const analysisStream = await analyzeResults(
@@ -515,11 +518,19 @@ export function runAgentLoop(question: string): ReadableStream {
             );
             const reader = analysisStream.getReader();
             const decoder = new TextDecoder();
+            let fullAnalysis = '';
             while (true) {
               const { done, value } = await reader.read();
               if (done) break;
               const delta = decoder.decode(value, { stream: true });
+              fullAnalysis += delta;
               emit(controller, { type: 'analysis_chunk', delta });
+            }
+
+            // Parse chart config from the completed analysis text
+            const { chartConfig } = parseChartConfigFromAnalysis(fullAnalysis);
+            if (chartConfig) {
+              llmChartConfig = chartConfig;
             }
           } catch (err) {
             emit(controller, {
@@ -533,6 +544,7 @@ export function runAgentLoop(question: string): ReadableStream {
           type: 'done',
           iterations: finalIteration,
           finalIteration,
+          ...(llmChartConfig ? { chartConfig: llmChartConfig } : {}),
         });
       } catch (err) {
         emit(controller, {

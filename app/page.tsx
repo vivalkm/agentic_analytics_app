@@ -322,6 +322,18 @@ export default function Home() {
                   updateCellMetadata(analysisCellId, { iteration: event.iterations });
                 }
 
+                // If LLM provided a chart config, override the heuristic one on the results cell
+                if (event.chartConfig && latestResultsCellId) {
+                  updateCellMetadata(latestResultsCellId, { chartConfig: event.chartConfig });
+                }
+
+                // Strip the ```chart block from analysis text
+                if (analysisCellId && analysisText.includes('```chart')) {
+                  const cleaned = analysisText.replace(/```chart\s*\n?[\s\S]*?```/, '').trimEnd();
+                  updateCell(analysisCellId, { content: cleaned });
+                  analysisText = cleaned;
+                }
+
                 // If there were multiple iterations, collapse thinking steps
                 if (event.iterations > 1) {
                   collapseThinkingCells(agentRunId);
@@ -344,7 +356,7 @@ export default function Home() {
           }
         }
 
-        // Update analysis cell with final metadata
+        // Update analysis cell with final metadata (results, chart config, sql)
         if (analysisCellId && latestResultsCellId) {
           setCells((prev) => {
             const resultsCell = prev.find((c) => c.id === latestResultsCellId);
@@ -355,6 +367,7 @@ export default function Home() {
                     metadata: {
                       ...c.metadata,
                       results: resultsCell?.metadata?.results,
+                      // Use the results cell's chartConfig (which may have been overridden by LLM)
                       chartConfig: resultsCell?.metadata?.chartConfig,
                       sql: sqlCellIds[finalIteration]
                         ? prev.find((x) => x.id === sqlCellIds[finalIteration])
