@@ -1,10 +1,11 @@
-import { AgentEvent, QueryResult, TableMetadata } from './types';
+import { AgentEvent, QueryResult, TableMetadata, ConversationTurn } from './types';
 import {
   generateSQL,
   analyzeResults,
   fixSQL,
   validateResults,
   generateRevisedSQL,
+  reviewSQL,
   buildTableContext,
   checkDateCompleteness,
   parseChartConfigFromAnalysis,
@@ -109,7 +110,7 @@ function getUnusedTables(
  * Run the agentic query loop.
  * Returns an NDJSON ReadableStream of AgentEvent objects.
  */
-export function runAgentLoop(question: string): ReadableStream {
+export function runAgentLoop(question: string, history?: ConversationTurn[]): ReadableStream {
   return new ReadableStream({
     async start(controller) {
       try {
@@ -142,7 +143,7 @@ export function runAgentLoop(question: string): ReadableStream {
           try {
             let stream: ReadableStream;
             if (iteration === 1) {
-              stream = await generateSQL(question, relevantTables, relevantQueries);
+              stream = await generateSQL(question, relevantTables, relevantQueries, history);
             } else {
               // Build context about what was already tried
               const unusedTables = getUnusedTables(relevantTables, usedTableNames);
@@ -198,10 +199,49 @@ export function runAgentLoop(question: string): ReadableStream {
             break;
           }
 
+          // --- LLM review (logical error check) ---
+          try {
+            emit(controller, {
+              type: 'thinking',
+              iteration,
+              content: 'Reviewing query for logical errors...',
+            });
+            const review = await reviewSQL(question, currentSQL, relevantTables);
+            if (!review.approved && review.correctedSQL) {
+              const issuesSummary = review.issues.join('; ');
+              emit(controller, {
+                type: 'thinking',
+                iteration,
+                content: `Found issues: ${issuesSummary}. Auto-correcting...`,
+              });
+              currentSQL = review.correctedSQL;
+              usedTableNames.push(...extractTablesFromSQL(review.correctedSQL));
+              emit(controller, {
+                type: 'sql',
+                iteration,
+                sql: review.correctedSQL,
+                explanation: `Corrected: ${issuesSummary}`,
+              });
+
+              // Re-validate the corrected SQL
+              const correctedValidation = validateSQL(review.correctedSQL);
+              if (!correctedValidation.valid) {
+                emit(controller, {
+                  type: 'error',
+                  content: correctedValidation.error || 'Corrected SQL validation failed',
+                  iteration,
+                });
+                break;
+              }
+            }
+          } catch (reviewErr) {
+            console.error('[agent] SQL review failed, proceeding:', reviewErr);
+          }
+
           // --- Execute ---
           let execResult: { columns: string[]; columnTypes: string[]; rows: Record<string, unknown>[] };
           try {
-            execResult = await executeTrinoMCP(sql);
+            execResult = await executeTrinoMCP(currentSQL);
           } catch (err) {
             const errorMsg = err instanceof Error ? err.message : 'Execution failed';
 
@@ -214,7 +254,7 @@ export function runAgentLoop(question: string): ReadableStream {
               });
 
               try {
-                const fixStream = await fixSQL(errorMsg, sql, question, relevantTables);
+                const fixStream = await fixSQL(errorMsg, currentSQL, question, relevantTables);
                 const fixResponse = await collectStream(fixStream);
                 const fixedSQL = extractSQL(fixResponse);
                 if (fixedSQL) {
@@ -514,7 +554,8 @@ export function runAgentLoop(question: string): ReadableStream {
             const analysisStream = await analyzeResults(
               question,
               currentSQL,
-              currentResults
+              currentResults,
+              history
             );
             const reader = analysisStream.getReader();
             const decoder = new TextDecoder();

@@ -216,41 +216,41 @@ function parseMCPResult(result: unknown): {
     return { columns: [], columnTypes: [], rows: [] };
   }
 
+  // Try JSON first
+  let parsed: Record<string, unknown>;
   try {
-    const parsed = JSON.parse(textContent.text);
-
-    if (parsed.success === false) {
-      throw new Error(parsed.error || 'Query failed');
-    }
-
-    const data: Record<string, unknown>[] = parsed.data || [];
-    const columns: string[] =
-      parsed.columns || (data.length > 0 ? Object.keys(data[0]) : []);
-
-    // Infer column types from data
-    const columnTypes = columns.map((col) => {
-      const sample = data.find((r) => r[col] !== null && r[col] !== undefined);
-      if (!sample) return 'varchar';
-      const val = sample[col];
-      if (typeof val === 'number') {
-        return Number.isInteger(val) ? 'bigint' : 'double';
-      }
-      if (typeof val === 'boolean') return 'boolean';
-      // Check for date-like strings
-      if (typeof val === 'string' && /^\d{4}-\d{2}-\d{2}/.test(val)) {
-        return val.includes('T') || val.includes(' ') ? 'timestamp' : 'date';
-      }
-      return 'varchar';
-    });
-
-    return { columns, columnTypes, rows: data };
-  } catch (e) {
-    if (e instanceof Error && e.message !== 'Query failed') {
-      // Try to parse as plain text
-      return parseTextResult(textContent.text);
-    }
-    throw e;
+    parsed = JSON.parse(textContent.text);
+  } catch {
+    // Not JSON — fall back to text parsing
+    return parseTextResult(textContent.text);
   }
+
+  // JSON parsed successfully — check for Trino errors
+  if (parsed.success === false) {
+    throw new Error((parsed.error as string) || 'Query failed');
+  }
+
+  const data: Record<string, unknown>[] = (parsed.data as Record<string, unknown>[]) || [];
+  const columns: string[] =
+    (parsed.columns as string[]) || (data.length > 0 ? Object.keys(data[0]) : []);
+
+  // Infer column types from data
+  const columnTypes = columns.map((col) => {
+    const sample = data.find((r) => r[col] !== null && r[col] !== undefined);
+    if (!sample) return 'varchar';
+    const val = sample[col];
+    if (typeof val === 'number') {
+      return Number.isInteger(val) ? 'bigint' : 'double';
+    }
+    if (typeof val === 'boolean') return 'boolean';
+    // Check for date-like strings
+    if (typeof val === 'string' && /^\d{4}-\d{2}-\d{2}/.test(val)) {
+      return val.includes('T') || val.includes(' ') ? 'timestamp' : 'date';
+    }
+    return 'varchar';
+  });
+
+  return { columns, columnTypes, rows: data };
 }
 
 function parseTextResult(text: string): {
@@ -306,10 +306,13 @@ export async function executeTrinoMCP(sql: string): Promise<{
 }> {
   const mcpClient = getClient();
 
+  // SHOW/DESCRIBE/EXPLAIN commands don't support LIMIT in Trino
+  const isMetadataCommand = /^\s*(SHOW|DESCRIBE|EXPLAIN)\b/i.test(sql);
+
   const result = await mcpClient.callTool('query_trino', {
     sql,
     environment: process.env.TRINO_ENVIRONMENT || 'preprod',
-    limit: 10000,
+    ...(isMetadataCommand ? {} : { limit: 10000 }),
   });
 
   return parseMCPResult(result);

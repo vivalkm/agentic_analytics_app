@@ -1,4 +1,7 @@
--- the query pulls transaction data for a specific date range, and calculates various metrics related to remittance revenue and profit.
+-- the query pulls core remittance (excluding Remitly Business (also called SMB) and Rewire (sent from Israel)) transaction data for a specific date range, and calculates various metrics related to remittance revenue and profit.
+-- key filters by product
+-- For SMB data: txn_is_core and customer_is_business = True
+-- For Rewire data: txn_is_migrated_rewire and transaction_remittance_distro_id = 'app_id_ra_ril'
 
 select 
   dd.datevalue

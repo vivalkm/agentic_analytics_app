@@ -98,49 +98,51 @@ async function introspectSchema(
   tables: TableMetadata[]
 ): Promise<void> {
   try {
+    // Use information_schema instead of SHOW TABLES (which doesn't support LIMIT)
     const tableResult = await executeTrinoMCP(
-      `SHOW TABLES FROM "${catalog}"."${schema}"`
+      `SELECT table_name FROM ${catalog}.information_schema.tables WHERE table_schema = '${schema}'`
     );
 
-    for (const row of tableResult.rows) {
-      const tableName = Object.values(row)[0];
-      if (typeof tableName !== 'string') continue;
+    // Batch-fetch all columns for this schema in one query
+    const colResult = await executeTrinoMCP(
+      `SELECT table_name, column_name, data_type, comment FROM ${catalog}.information_schema.columns WHERE table_schema = '${schema}' ORDER BY table_name, ordinal_position`
+    );
 
-      try {
-        const descResult = await executeTrinoMCP(
-          `DESCRIBE "${catalog}"."${schema}"."${tableName}"`
-        );
-
-        const columns = descResult.rows.map((r) => ({
-          name: String(r['Column'] || r['column'] || r[descResult.columns[0]] || ''),
-          type: String(r['Type'] || r['type'] || r[descResult.columns[1]] || 'unknown'),
-          comment:
-            r['Comment'] || r['comment'] || r[descResult.columns[3]]
-              ? String(r['Comment'] || r['comment'] || r[descResult.columns[3]])
-              : undefined,
-        }));
-
-        tables.push({
-          catalog,
-          schema,
-          table: tableName,
-          columns,
-          lastRefreshed: new Date().toISOString(),
-        });
-
-        // Update cache progressively
-        metadataCache = {
-          catalogs,
-          schemas: allSchemas,
-          tables: [...tables],
-          lastRefreshed: new Date().toISOString(),
-        };
-      } catch (e) {
-        console.error(`[metadata] Failed to describe ${catalog}.${schema}.${tableName}:`, e);
-      }
+    // Group columns by table
+    const columnsByTable = new Map<string, { name: string; type: string; comment?: string }[]>();
+    for (const row of colResult.rows) {
+      const tbl = String(row['table_name'] || '');
+      if (!tbl) continue;
+      if (!columnsByTable.has(tbl)) columnsByTable.set(tbl, []);
+      columnsByTable.get(tbl)!.push({
+        name: String(row['column_name'] || ''),
+        type: String(row['data_type'] || 'unknown'),
+        comment: row['comment'] ? String(row['comment']) : undefined,
+      });
     }
+
+    for (const row of tableResult.rows) {
+      const tableName = String(row['table_name'] || '');
+      if (!tableName) continue;
+
+      tables.push({
+        catalog,
+        schema,
+        table: tableName,
+        columns: columnsByTable.get(tableName) || [],
+        lastRefreshed: new Date().toISOString(),
+      });
+    }
+
+    // Update cache progressively
+    metadataCache = {
+      catalogs,
+      schemas: allSchemas,
+      tables: [...tables],
+      lastRefreshed: new Date().toISOString(),
+    };
   } catch (e) {
-    console.error(`[metadata] Failed to list tables for ${catalog}.${schema}:`, e);
+    console.error(`[metadata] Failed to introspect ${catalog}.${schema}:`, e);
   }
 }
 
@@ -155,29 +157,25 @@ async function refreshMetadata(): Promise<void> {
   const schemas: Record<string, string[]> = {};
   const tables: TableMetadata[] = [];
 
-  // Step 1: List catalogs
-  try {
-    const catalogResult = await executeTrinoMCP('SHOW CATALOGS');
-    for (const row of catalogResult.rows) {
-      const val = Object.values(row)[0];
-      if (typeof val === 'string') catalogs.push(val);
-    }
-  } catch (e) {
-    console.error('[metadata] Failed to list catalogs:', e);
-    catalogs.push(config.defaultCatalog);
-  }
+  // Step 1: Only introspect the configured catalog (default: "lakehouse").
+  // System catalogs (system, jmx, memory, etc.) cause errors when introspected
+  // and are not useful for data queries.
+  catalogs.push(config.defaultCatalog);
 
   metadataCache = { catalogs, schemas: {}, tables: [], lastRefreshed: new Date().toISOString() };
-  console.log(`[metadata] Found ${catalogs.length} catalogs`);
+  console.log(`[metadata] Introspecting catalog: ${config.defaultCatalog}`);
 
-  // Step 2: List schemas per catalog
+  // Step 2: List schemas for the target catalog
   for (const catalog of catalogs) {
     try {
-      const schemaResult = await executeTrinoMCP(`SHOW SCHEMAS FROM "${catalog}"`);
+      // Use information_schema instead of SHOW SCHEMAS (which doesn't support LIMIT)
+      const schemaResult = await executeTrinoMCP(
+        `SELECT schema_name FROM ${catalog}.information_schema.schemata`
+      );
       const schemaNames: string[] = [];
       for (const row of schemaResult.rows) {
-        const val = Object.values(row)[0];
-        if (typeof val === 'string') schemaNames.push(val);
+        const val = String(row['schema_name'] || '');
+        if (val) schemaNames.push(val);
       }
       schemas[catalog] = schemaNames;
     } catch (e) {

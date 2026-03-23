@@ -82,3 +82,10 @@ export interface ValidationResult {
   reason: string;
   suggestion?: string;
 }
+
+export interface ConversationTurn {
+  question: string;
+  sql?: string;
+  resultSummary?: string;
+  analysis?: string;
+}

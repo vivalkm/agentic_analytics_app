@@ -8,11 +8,17 @@ import { ThinkingStep } from '@/components/thinking-step';
 import { ChartRenderer } from '@/components/chart-renderer';
 import { CSVDownload } from '@/components/csv-download';
 import { RawDataPreview } from '@/components/raw-data-preview';
-import { NotebookCell, QueryResult, AgentEvent } from '@/lib/types';
+import { NotebookCell, QueryResult, AgentEvent, ConversationTurn } from '@/lib/types';
 import { loadSession, saveSession, generateCellId } from '@/lib/session';
 import { detectChartType } from '@/lib/chart-detector';
-import { Database, Trash2, Loader2, Sparkles, Play, Search, CheckCircle2 } from 'lucide-react';
+import { SchemaExplorer } from '@/components/schema-explorer';
+import { QueryLibrary } from '@/components/query-library';
+import { Database, Trash2, Loader2, Sparkles, Play, Search, CheckCircle2, PanelLeft, PanelLeftClose, Menu, ArrowDown } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { cn } from '@/lib/utils';
 
 type AgentPhase =
   | 'idle'
@@ -22,14 +28,50 @@ type AgentPhase =
   | 'retrying'
   | 'analyzing';
 
+function buildHistory(cells: NotebookCell[], maxTurns = 3): ConversationTurn[] {
+  // Group cells by agentRunId into completed turns
+  const runs = new Map<string, { question?: string; sql?: string; results?: QueryResult; analysis?: string }>();
+  for (const cell of cells) {
+    const runId = cell.metadata?.agentRunId;
+    if (!runId) continue;
+    if (!runs.has(runId)) runs.set(runId, {});
+    const run = runs.get(runId)!;
+    if (cell.type === 'question') run.question = cell.content;
+    if (cell.type === 'sql' && cell.metadata?.sql) run.sql = cell.metadata.sql;
+    if (cell.type === 'results' && cell.metadata?.results) run.results = cell.metadata.results;
+    if (cell.type === 'analysis') run.analysis = cell.content;
+  }
+
+  const turns: ConversationTurn[] = [];
+  for (const run of runs.values()) {
+    if (!run.question || !run.sql) continue; // skip incomplete runs
+    const r = run.results;
+    turns.push({
+      question: run.question,
+      sql: run.sql,
+      resultSummary: r ? `${r.rowCount} rows, columns: ${r.columns.join(', ')}` : undefined,
+      analysis: run.analysis ? run.analysis.slice(0, 500) : undefined,
+    });
+  }
+  return turns.slice(-maxTurns);
+}
+
 export default function Home() {
   const [cells, setCells] = useState<NotebookCell[]>([]);
   const [agentPhase, setAgentPhase] = useState<AgentPhase>('idle');
   const [agentIteration, setAgentIteration] = useState(1);
   const [streamingSQL, setStreamingSQL] = useState('');
   const [isExecuting, setIsExecuting] = useState(false); // For manual re-runs
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [mobileSheetOpen, setMobileSheetOpen] = useState(false);
+  const [prefillValue, setPrefillValue] = useState('');
+  const [prefillKey, setPrefillKey] = useState(0);
+  const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const initialized = useRef(false);
+  const cellsRef = useRef(cells);
+  cellsRef.current = cells;
+  const isNearBottomRef = useRef(true);
 
   // Load session on mount
   useEffect(() => {
@@ -44,13 +86,36 @@ export default function Home() {
     if (cells.length > 0) saveSession(cells);
   }, [cells]);
 
-  // Auto-scroll to bottom
+  // Track scroll position to decide auto-scroll behavior
   useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const handleScroll = () => {
+      const threshold = 150;
+      const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < threshold;
+      isNearBottomRef.current = nearBottom;
+      setShowScrollToBottom(!nearBottom);
+    };
+    el.addEventListener('scroll', handleScroll, { passive: true });
+    return () => el.removeEventListener('scroll', handleScroll);
+  }, []);
+
+  // Auto-scroll only when user is already near the bottom
+  useEffect(() => {
+    if (isNearBottomRef.current) {
+      scrollRef.current?.scrollTo({
+        top: scrollRef.current.scrollHeight,
+        behavior: 'smooth',
+      });
+    }
+  }, [cells, streamingSQL, agentPhase]);
+
+  const scrollToBottom = useCallback(() => {
     scrollRef.current?.scrollTo({
       top: scrollRef.current.scrollHeight,
       behavior: 'smooth',
     });
-  }, [cells, streamingSQL, agentPhase]);
+  }, []);
 
   const addCell = useCallback((cell: NotebookCell) => {
     setCells((prev) => [...prev, cell]);
@@ -120,10 +185,11 @@ export default function Home() {
       let currentStreamingIteration = 1;
 
       try {
+        const history = buildHistory(cellsRef.current);
         const res = await fetch('/api/agent', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ question }),
+          body: JSON.stringify({ question, history }),
         });
 
         if (!res.ok) {
@@ -457,6 +523,20 @@ export default function Home() {
     saveSession([]);
   };
 
+  const handleInsertTable = useCallback((fqn: string) => {
+    setPrefillValue(fqn);
+    setPrefillKey((k) => k + 1);
+    setMobileSheetOpen(false);
+  }, []);
+
+  const handleUseQuery = useCallback(
+    (question: string) => {
+      streamAgentResponse(question);
+      setMobileSheetOpen(false);
+    },
+    [streamAgentResponse]
+  );
+
   const isLoading = agentPhase !== 'idle' || isExecuting;
 
   const phaseConfig: Record<AgentPhase, { icon: typeof Loader2; text: string; color: string }> = {
@@ -476,29 +556,91 @@ export default function Home() {
     analyzing: { icon: CheckCircle2, text: 'Analyzing results...', color: 'text-green-400' },
   };
 
-  return (
-    <div className="flex h-screen flex-col">
-      {/* Header */}
-      <header className="flex items-center justify-between border-b border-border px-4 py-2">
-        <div className="flex items-center gap-2">
-          <Database className="h-5 w-5 text-primary" />
-          <h1 className="text-lg font-semibold">Lakehouse Analytics</h1>
-        </div>
-        {cells.length > 0 && (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={handleClearSession}
-            className="text-xs text-muted-foreground"
-          >
-            <Trash2 className="mr-1 h-3 w-3" />
-            Clear
-          </Button>
-        )}
-      </header>
+  const sidebarContent = (
+    <Tabs defaultValue="schema" className="flex h-full flex-col">
+      <TabsList className="mx-3 mt-3 shrink-0">
+        <TabsTrigger value="schema">Schema</TabsTrigger>
+        <TabsTrigger value="library">Library</TabsTrigger>
+      </TabsList>
+      <TabsContent value="schema" className="flex-1 overflow-hidden">
+        <ScrollArea className="h-full">
+          <SchemaExplorer onInsertTable={handleInsertTable} />
+        </ScrollArea>
+      </TabsContent>
+      <TabsContent value="library" className="flex-1 overflow-hidden">
+        <ScrollArea className="h-full">
+          <QueryLibrary onUseQuery={handleUseQuery} />
+        </ScrollArea>
+      </TabsContent>
+    </Tabs>
+  );
 
-      {/* Notebook cells */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto">
+  return (
+    <div className="flex h-screen">
+      {/* Desktop sidebar */}
+      <aside
+        className={cn(
+          'hidden md:flex flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground transition-[width] duration-200 ease-in-out overflow-hidden',
+          sidebarOpen ? 'w-[280px] min-w-[280px]' : 'w-0 min-w-0'
+        )}
+      >
+        {sidebarOpen && sidebarContent}
+      </aside>
+
+      {/* Mobile sidebar (Sheet) */}
+      <Sheet open={mobileSheetOpen} onOpenChange={setMobileSheetOpen}>
+        <SheetContent side="left" className="w-[300px] p-0 bg-sidebar text-sidebar-foreground">
+          <SheetTitle className="sr-only">Navigation</SheetTitle>
+          {sidebarContent}
+        </SheetContent>
+      </Sheet>
+
+      {/* Main content */}
+      <div className="flex flex-1 flex-col min-w-0">
+        {/* Header */}
+        <header className="flex items-center justify-between border-b border-border px-4 py-2">
+          <div className="flex items-center gap-2">
+            {/* Mobile hamburger */}
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 md:hidden"
+              onClick={() => setMobileSheetOpen(true)}
+            >
+              <Menu className="h-4 w-4" />
+            </Button>
+            {/* Desktop sidebar toggle */}
+            <Button
+              variant="ghost"
+              size="icon"
+              className="hidden md:inline-flex h-8 w-8"
+              onClick={() => setSidebarOpen((o) => !o)}
+            >
+              {sidebarOpen ? (
+                <PanelLeftClose className="h-4 w-4" />
+              ) : (
+                <PanelLeft className="h-4 w-4" />
+              )}
+            </Button>
+            <Database className="h-5 w-5 text-primary" />
+            <h1 className="text-lg font-semibold">Lakehouse Analytics</h1>
+          </div>
+          {cells.length > 0 && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleClearSession}
+              className="text-xs text-muted-foreground"
+            >
+              <Trash2 className="mr-1 h-3 w-3" />
+              Clear
+            </Button>
+          )}
+        </header>
+
+        {/* Notebook cells */}
+        <div className="relative flex-1 overflow-hidden">
+        <div ref={scrollRef} className="h-full overflow-y-auto">
         <div className="mx-auto max-w-4xl space-y-4 p-4 pb-32">
           {cells.length === 0 && (
             <div className="flex flex-col items-center justify-center py-24 text-center">
@@ -644,10 +786,28 @@ export default function Home() {
         </div>
       </div>
 
-      {/* Input pinned at bottom */}
-      <div className="border-t border-border bg-background p-4">
-        <div className="mx-auto max-w-4xl">
-          <ChatInput onSubmit={streamAgentResponse} isLoading={isLoading} />
+        {/* Scroll to bottom button */}
+        {showScrollToBottom && (
+          <button
+            onClick={scrollToBottom}
+            className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10 flex items-center gap-1.5 rounded-full border border-border bg-background/90 px-3 py-1.5 text-xs text-muted-foreground shadow-md backdrop-blur transition-colors hover:text-foreground hover:border-primary"
+          >
+            <ArrowDown className="h-3 w-3" />
+            Scroll to bottom
+          </button>
+        )}
+      </div>
+
+        {/* Input pinned at bottom */}
+        <div className="border-t border-border bg-background p-4">
+          <div className="mx-auto max-w-4xl">
+            <ChatInput
+              onSubmit={streamAgentResponse}
+              isLoading={isLoading}
+              prefillValue={prefillValue}
+              prefillKey={prefillKey}
+            />
+          </div>
         </div>
       </div>
     </div>

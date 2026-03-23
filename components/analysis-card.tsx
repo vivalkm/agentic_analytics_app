@@ -121,10 +121,10 @@ function renderMarkdown(text: string): string {
       continue;
     }
 
-    // Numbered lists
+    // Numbered lists — render as unordered (bullet) lists
     const numMatch = line.match(/^\d+\. (.+)$/);
     if (numMatch) {
-      outputParts.push(`<li class="ml-4 list-decimal">${inlineFormat(numMatch[1])}</li>`);
+      outputParts.push(`<li class="ml-4 list-disc">${inlineFormat(numMatch[1])}</li>`);
       continue;
     }
 

@@ -8,12 +8,16 @@ interface ChatInputProps {
   onSubmit: (question: string) => void;
   isLoading: boolean;
   placeholder?: string;
+  prefillValue?: string;
+  prefillKey?: number;
 }
 
 export function ChatInput({
   onSubmit,
   isLoading,
   placeholder = 'Ask a question about your data... (⌘+Enter to submit)',
+  prefillValue,
+  prefillKey,
 }: ChatInputProps) {
   const [value, setValue] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -47,6 +51,14 @@ export function ChatInput({
   useEffect(() => {
     textareaRef.current?.focus();
   }, []);
+
+  // External prefill from sidebar
+  useEffect(() => {
+    if (prefillValue !== undefined && prefillValue !== '') {
+      setValue(prefillValue);
+      textareaRef.current?.focus();
+    }
+  }, [prefillValue, prefillKey]);
 
   return (
     <div className="flex items-end gap-2 rounded-xl border border-border bg-card p-3 shadow-sm">

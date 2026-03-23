@@ -1,5 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk';
-import { TableMetadata, QueryResult, QueryLibraryEntry, ValidationResult } from './types';
+import { TableMetadata, QueryResult, QueryLibraryEntry, ValidationResult, ConversationTurn } from './types';
 
 const getClient = () =>
   new Anthropic({
@@ -13,7 +13,7 @@ const SQL_SYSTEM_PROMPT = `You are a SQL analyst for a Trino-based data lakehous
 
 Rules:
 - ONLY generate SELECT, WITH (CTE), SHOW, DESCRIBE, or EXPLAIN statements. NEVER generate INSERT, UPDATE, DELETE, DROP, ALTER, CREATE, TRUNCATE, MERGE, or any other data-modification SQL. If the user asks you to modify data, politely decline and explain this is a read-only analytics tool.
-- Always use fully qualified table names (catalog.schema.table)
+- Always use fully qualified table names (catalog.schema.table). The catalog is ALWAYS "lakehouse" — e.g. lakehouse.fpa.transaction_economics, NOT fpa.analytics.transaction_economics. Never use a schema name as the catalog.
 - Prefer CTEs over subqueries for readability
 - Add LIMIT clauses unless the user explicitly asks for all rows
 - Use table/column comments to understand business meaning
@@ -113,10 +113,24 @@ export function buildTableContext(tables: TableMetadata[]): string {
     .join('\n\n');
 }
 
+function buildHistoryMessages(history?: ConversationTurn[]): Anthropic.MessageParam[] {
+  const messages: Anthropic.MessageParam[] = [];
+  for (const turn of history ?? []) {
+    messages.push({ role: 'user', content: turn.question });
+    let resp = '';
+    if (turn.sql) resp += `\`\`\`sql\n${turn.sql}\n\`\`\`\n`;
+    if (turn.resultSummary) resp += `Results: ${turn.resultSummary}\n`;
+    if (turn.analysis) resp += `Analysis: ${turn.analysis}`;
+    if (resp) messages.push({ role: 'assistant', content: resp.trim() });
+  }
+  return messages;
+}
+
 export async function generateSQL(
   question: string,
   relevantTables: TableMetadata[],
-  relevantQueries: QueryLibraryEntry[]
+  relevantQueries: QueryLibraryEntry[],
+  history?: ConversationTurn[]
 ): Promise<ReadableStream> {
   const tableContext = buildTableContext(relevantTables);
 
@@ -134,12 +148,17 @@ export async function generateSQL(
     tableContext +
     queryContext;
 
+  const messages: Anthropic.MessageParam[] = [
+    ...buildHistoryMessages(history),
+    { role: 'user', content: question },
+  ];
+
   const client = getClient();
   const stream = client.messages.stream({
     model: getModel(),
     max_tokens: 4096,
     system: systemPrompt,
-    messages: [{ role: 'user', content: question }],
+    messages,
   });
 
   return new ReadableStream({
@@ -161,7 +180,8 @@ export async function generateSQL(
 export async function analyzeResults(
   question: string,
   sql: string,
-  results: QueryResult
+  results: QueryResult,
+  history?: ConversationTurn[]
 ): Promise<ReadableStream> {
   const resultsPreview = results.rows.slice(0, 50);
   const resultsText = JSON.stringify(resultsPreview, null, 2);
@@ -178,12 +198,17 @@ ${resultsText}
 
 Column names and types: ${results.columns.map((c, i) => `${c} (${results.columnTypes[i]})`).join(', ')}`;
 
+  const messages: Anthropic.MessageParam[] = [
+    ...buildHistoryMessages(history),
+    { role: 'user', content: userContent },
+  ];
+
   const client = getClient();
   const stream = client.messages.stream({
     model: getModel(),
     max_tokens: 4096,
     system: ANALYSIS_SYSTEM_PROMPT,
-    messages: [{ role: 'user', content: userContent }],
+    messages,
   });
 
   return new ReadableStream({
@@ -385,6 +410,88 @@ export async function generateRevisedSQL(
       controller.close();
     },
   });
+}
+
+export interface SQLReviewResult {
+  approved: boolean;
+  correctedSQL?: string;
+  issues: string[];
+}
+
+const SQL_REVIEW_SYSTEM_PROMPT = `You are a SQL reviewer for a Trino-based data lakehouse. Your job is to catch logical errors in SQL queries BEFORE they are executed.
+
+Review the query for these common mistakes:
+1. **Join fan-out / many-to-many**: JOINs on non-unique keys that multiply rows (e.g. joining two fact tables on day_of_quarter creates a cross product). This is the most critical issue — look for it first.
+2. **Wrong date ranges**: Query asks about "this quarter" but filters include multiple quarters, or compares the wrong periods.
+3. **Incorrect aggregation**: GROUP BY is missing columns, or aggregating over a dimension that should be filtered.
+4. **Wrong table qualifiers**: The catalog must always be "lakehouse" (e.g. lakehouse.fpa.table, NOT fpa.analytics.table).
+5. **Ambiguous column references**: Columns used in JOINs or WHERE that could belong to multiple tables but aren't qualified.
+6. **Logic errors**: Conditions that contradict each other, OR/AND precedence issues, comparing incompatible types.
+
+Respond with ONLY a valid JSON object, no other text:
+{"approved": true, "issues": [], "correctedSQL": null}
+
+If you find issues, set approved=false, list each issue, and put the full corrected SQL in correctedSQL as a plain SQL string (no markdown fences):
+{"approved": false, "issues": ["issue 1", "issue 2"], "correctedSQL": "SELECT ... FROM ..."}
+
+Only provide correctedSQL if you found actual issues. Do NOT rewrite a correct query just to improve style.`;
+
+/**
+ * Review a SQL query for logical errors before execution.
+ * Non-streaming — returns structured JSON.
+ */
+export async function reviewSQL(
+  question: string,
+  sql: string,
+  tables: TableMetadata[],
+): Promise<SQLReviewResult> {
+  const tableContext = buildTableContext(tables);
+
+  const userContent = `User's question: "${question}"
+
+SQL to review:
+\`\`\`sql
+${sql}
+\`\`\`
+
+Available tables:
+${tableContext}`;
+
+  const client = getClient();
+  const response = await client.messages.create({
+    model: getModel(),
+    max_tokens: 2048,
+    system: SQL_REVIEW_SYSTEM_PROMPT,
+    messages: [{ role: 'user', content: userContent }],
+  });
+
+  const text = response.content
+    .filter((b) => b.type === 'text')
+    .map((b) => b.text)
+    .join('');
+
+  try {
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      const parsed = JSON.parse(jsonMatch[0]);
+      let correctedSQL: string | undefined;
+      if (parsed.correctedSQL && parsed.correctedSQL !== 'null') {
+        const raw = String(parsed.correctedSQL).trim();
+        // Handle both fenced and plain SQL
+        const sqlMatch = raw.match(/```sql\n?([\s\S]*?)```/);
+        correctedSQL = sqlMatch ? sqlMatch[1].trim() : raw;
+      }
+      return {
+        approved: Boolean(parsed.approved),
+        issues: Array.isArray(parsed.issues) ? parsed.issues.map(String) : [],
+        correctedSQL,
+      };
+    }
+  } catch {
+    // Parse failure — approve to avoid blocking
+  }
+
+  return { approved: true, issues: [] };
 }
 
 /**
