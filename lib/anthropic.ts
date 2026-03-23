@@ -17,6 +17,7 @@ Rules:
 - Prefer CTEs over subqueries for readability
 - Add LIMIT clauses unless the user explicitly asks for all rows
 - Use table/column comments to understand business meaning
+- IMPORTANT: When the user asks about actual/historical data (revenue, transactions, volumes), prefer tables with actual transaction records (e.g. transaction_economics, transactions) over forecast/outlook/budget tables (e.g. daily_outlook, forecast). Only use outlook/forecast tables when the user explicitly asks about forecasts, budgets, or projections.
 - If you're unsure about a column's meaning, state your assumption
 - Output the SQL in a \`\`\`sql code block, followed by a brief explanation
 - After the explanation, list any assumptions you made`;

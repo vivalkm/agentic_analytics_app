@@ -280,7 +280,8 @@ export function findRelevantTables(
     if (config.prioritySchemas.includes(schemaName)) {
       score += 5;
     }
-    if (config.priorityTables.includes(fqn)) {
+    const shortFqn = `${schemaName}.${tableName}`;
+    if (config.priorityTables.includes(fqn) || config.priorityTables.includes(shortFqn)) {
       score += 15;
     }
 

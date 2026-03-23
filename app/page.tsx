@@ -5,6 +5,9 @@ import { ChatInput } from '@/components/chat-input';
 import { SQLEditor } from '@/components/sql-editor';
 import { AnalysisCard } from '@/components/analysis-card';
 import { ThinkingStep } from '@/components/thinking-step';
+import { ChartRenderer } from '@/components/chart-renderer';
+import { CSVDownload } from '@/components/csv-download';
+import { RawDataPreview } from '@/components/raw-data-preview';
 import { NotebookCell, QueryResult, AgentEvent } from '@/lib/types';
 import { loadSession, saveSession, generateCellId } from '@/lib/session';
 import { detectChartType } from '@/lib/chart-detector';
@@ -234,7 +237,7 @@ export default function Home() {
                   rowCount: event.rowCount,
                   executionTimeMs: event.executionTimeMs,
                 };
-                const chartConfig = detectChartType(results);
+                const chartConfig = detectChartType(results, question);
                 const resultsCellId = generateCellId();
 
                 // Mark previous results cells as intermediate
@@ -556,10 +559,23 @@ export default function Home() {
                 {cell.type === 'results' &&
                   !cell.metadata?.isIntermediate &&
                   cell.metadata?.results && (
-                    <div className="text-xs text-muted-foreground px-1">
-                      {cell.metadata.results.rowCount} rows returned
-                      {cell.metadata.results.executionTimeMs > 0 &&
-                        ` in ${cell.metadata.results.executionTimeMs}ms`}
+                    <div className="space-y-3">
+                      <div className="flex items-center gap-2 px-1">
+                        <span className="text-xs text-muted-foreground">
+                          {cell.metadata.results.rowCount} rows returned
+                          {cell.metadata.results.executionTimeMs > 0 &&
+                            ` in ${cell.metadata.results.executionTimeMs}ms`}
+                        </span>
+                        <CSVDownload results={cell.metadata.results} />
+                      </div>
+                      {cell.metadata.chartConfig &&
+                        cell.metadata.chartConfig.type !== 'none' && (
+                          <ChartRenderer
+                            config={cell.metadata.chartConfig}
+                            results={cell.metadata.results}
+                          />
+                        )}
+                      <RawDataPreview results={cell.metadata.results} />
                     </div>
                   )}
 
