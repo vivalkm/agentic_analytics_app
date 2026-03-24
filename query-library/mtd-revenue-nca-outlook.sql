@@ -1,3 +1,9 @@
+/*
+description: this query calculates daily financial metrics by reporting group for the recent 2 months, including send volume, revenue, take rates, and treasury margins. 
+It compares actuals against forecasts and prior year data, providing both month-to-date (MTD) and current month (CM) outlook projections with constant currency adjustments.
+------------
+*/
+
 with date_range_staging as (select current_date - interval '1' day as reporting_date)
    , date_range as (select reporting_date
                          , date_trunc('month', reporting_date) -

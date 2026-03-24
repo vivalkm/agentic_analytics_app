@@ -40,6 +40,10 @@ Rules:
 - When asked about "month to date" (MTD), "quarter to date" (QTD), "year to date" (YTD), or any "to date" metric, always use CURRENT_DATE - INTERVAL '1' DAY as the end date (T-1), because today's data is incomplete and would be misleading.
 - Use Trino SQL syntax: DATE '2024-01-01' for date literals (NOT '2024-01-01'::date or CAST('...' AS DATE)). For integer date_key columns (e.g. 20240101), cast to date with date_parse(CAST(date_key AS VARCHAR), '%Y%m%d') or compare as integers (date_key >= 20240101). Use CURRENT_DATE and DATE_TRUNC for dates. For date arithmetic use interval expressions: CURRENT_DATE - INTERVAL '30' DAY, not DATE_ADD.
 - IMPORTANT: When the user asks about actual/historical data (revenue, transactions, volumes), prefer tables with actual transaction records (e.g. transaction_economics, transactions) over forecast/outlook/budget tables (e.g. daily_outlook, forecast). Only use outlook/forecast tables when the user explicitly asks about forecasts, budgets, or projections.
+- CRITICAL DEFAULT FILTERS — Core remittance: We focus on core remittance by default. When querying any table that has these columns, you MUST apply these filters unless the user explicitly asks otherwise:
+  - \`customer_is_business = FALSE\` — excludes SMB (Remitly Business) data. Only use TRUE if user asks about SMB/business customers. Omit only if user asks about "all customers" or "total".
+  - \`txn_is_core = TRUE\` — includes only core remittance transactions (excludes Rewire and other non-core). Omit only if the user explicitly asks about all transaction types, Rewire, or non-core transactions.
+- FORECAST TABLES: For monthly forecast data, always use \`fpa.fpa_fcst_latest\`. For daily forecast allocations, always use \`fpa.fpa_fcst_latest_daily_ma\`. Do not use other forecast tables unless the user explicitly names one.
 - If you're unsure about a column's meaning, state your assumption
 - If the question is vague or ambiguous (e.g. "products", "return rate" with no clear column mapping), do NOT guess. Instead, skip the SQL block entirely and ask the user clarifying questions. Explain what specific terms could mean given the available tables, and ask the user to pick. Only generate SQL when you can confidently map the question to specific columns.
 - Output the SQL in a \`\`\`sql code block, followed by a brief explanation
@@ -462,6 +466,9 @@ Review the query for these common mistakes:
 4. **Wrong table qualifiers**: The catalog must always be "lakehouse" (e.g. lakehouse.fpa.table, NOT fpa.analytics.table).
 5. **Ambiguous column references**: Columns used in JOINs or WHERE that could belong to multiple tables but aren't qualified.
 6. **Logic errors**: Conditions that contradict each other, OR/AND precedence issues, comparing incompatible types.
+7. **Missing core remittance filters**: If the query uses a table that has \`customer_is_business\` or \`txn_is_core\` columns but is missing these default filters, flag as an issue and add them in correctedSQL:
+   - \`customer_is_business = FALSE\` (skip only if user asks about SMB or all customers)
+   - \`txn_is_core = TRUE\` (skip only if user asks about all transaction types, Rewire, or non-core)
 
 Respond with ONLY a valid JSON object, no other text:
 {"approved": true, "issues": [], "correctedSQL": null}

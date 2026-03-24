@@ -1,3 +1,11 @@
+/*
+description: This query extracts daily financial metrics (send volume, revenue, take rate, etc.) 
+by reporting group and region from the daily outlook data. It includes date calculations 
+for current month, prior month, and year-over-year comparisons with weekday alignment adjustments.
+------------
+*/
+
+
 with date_range_staging as (select current_date - interval '1' day as reporting_date)
    , date_range as (select reporting_date
                          , date_trunc('month', reporting_date) -

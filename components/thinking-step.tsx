@@ -6,7 +6,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from '@radix-ui/react-collapsible';
-import { ChevronRight, Brain, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { ChevronRight, Brain, AlertTriangle, CheckCircle2, Loader2 } from 'lucide-react';
 
 interface ThinkingStepProps {
   content: string;
@@ -14,6 +14,8 @@ interface ThinkingStepProps {
   collapsed: boolean;
   validationResult?: { valid: boolean; reason: string; suggestion?: string };
   intermediateSQL?: string;
+  /** When true, shows a spinning loader instead of the static Brain icon */
+  inProgress?: boolean;
 }
 
 export function ThinkingStep({
@@ -22,6 +24,7 @@ export function ThinkingStep({
   collapsed: initialCollapsed,
   validationResult,
   intermediateSQL,
+  inProgress = false,
 }: ThinkingStepProps) {
   const [open, setOpen] = useState(!initialCollapsed);
 
@@ -36,7 +39,9 @@ export function ThinkingStep({
     ? validationResult.valid
       ? CheckCircle2
       : AlertTriangle
-    : Brain;
+    : inProgress
+      ? Loader2
+      : Brain;
 
   const iconColor = validationResult
     ? validationResult.valid
@@ -44,13 +49,15 @@ export function ThinkingStep({
       : 'text-amber-500'
     : 'text-blue-400';
 
+  const iconSpin = inProgress && !validationResult ? 'animate-spin' : '';
+
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
       <CollapsibleTrigger className="flex w-full items-center gap-2 rounded-xl border border-border/50 bg-muted/30 px-3.5 py-2.5 text-left text-base text-muted-foreground transition-colors hover:bg-muted/50">
         <ChevronRight
           className={`h-3 w-3 shrink-0 transition-transform ${open ? 'rotate-90' : ''}`}
         />
-        <StatusIcon className={`h-5 w-5 shrink-0 ${iconColor}`} />
+        <StatusIcon className={`h-5 w-5 shrink-0 ${iconColor} ${iconSpin}`} />
         <span className="truncate">{summary}</span>
       </CollapsibleTrigger>
       <CollapsibleContent>

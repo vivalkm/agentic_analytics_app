@@ -1,4 +1,10 @@
--- This query pulls weekly T6W CP data in current and prior years
+/*
+description: This query pulls weekly T6W CP data in current and prior years, comparing actual performance metrics with forecasts.
+T6W refers to "Trailing 6 Weeks" and CP stands for "contribution profit".
+The query analyzes key metrics including transaction count, send volume, revenue, costs, and RLTE (Revenue Less Transaction Expenses).
+------------
+*/
+
 with date_range as (select date_add('day', -(day_of_week(current_date) % 7) - 1, current_date)  as reporting_week_end
 , date_add('day', -(day_of_week(current_date) % 7) - 72, current_date) as t6w_start)
 

@@ -32,7 +32,7 @@ type AgentPhase =
   | 'retrying'
   | 'analyzing';
 
-function buildHistory(cells: NotebookCell[], maxTurns = 3): ConversationTurn[] {
+function buildHistory(cells: NotebookCell[], maxTurns = 10): ConversationTurn[] {
   // Group cells by agentRunId into completed turns
   const runs = new Map<string, { question?: string; sql?: string; results?: QueryResult; analysis?: string }>();
   for (const cell of cells) {
@@ -54,7 +54,7 @@ function buildHistory(cells: NotebookCell[], maxTurns = 3): ConversationTurn[] {
       question: run.question,
       sql: run.sql,
       resultSummary: r ? `${r.rowCount} rows, columns: ${r.columns.join(', ')}` : undefined,
-      analysis: run.analysis ? run.analysis.slice(0, 500) : undefined,
+      analysis: run.analysis ? run.analysis.slice(0, 1000) : undefined,
     });
   }
   return turns.slice(-maxTurns);
@@ -841,6 +841,7 @@ export default function Home() {
                     collapsed={cell.metadata?.collapsed || false}
                     validationResult={cell.metadata?.validationResult}
                     intermediateSQL={cell.metadata?.sql}
+                    inProgress={!cell.metadata?.validationResult && agentPhase !== 'idle'}
                   />
                 )}
 
@@ -993,7 +994,7 @@ export default function Home() {
                 const Icon = config.icon;
                 return (
                   <>
-                    <Icon className={`h-4 w-4 ${agentPhase === 'executing' || agentPhase === 'retrying' ? 'animate-spin' : 'animate-pulse'} ${config.color}`} />
+                    <Icon className={`h-4 w-4 ${agentPhase === 'generating' ? 'animate-pulse' : 'animate-spin'} ${config.color}`} />
                     <span className="text-base text-muted-foreground">
                       {statusText || config.text}
                     </span>

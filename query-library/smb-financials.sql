@@ -1,4 +1,7 @@
--- this query is used to get financials for Remilty Business (also called SMB).
+/*
+description: this query is used to get financials for Remilty Business (also called SMB).
+------------
+*/
 
 with																									
 -- transaction period in scope, T6M until last month, with T3M loss data up until 3 months ago																									

@@ -131,19 +131,10 @@ function QueryCard({
 }) {
   return (
     <div className="rounded-lg border border-sidebar-border p-2.5 space-y-2">
-      <div className="flex items-start justify-between gap-2">
+      <div className="flex items-start gap-2">
         <p className="text-xs font-medium leading-snug text-sidebar-foreground">
           {entry.description}
         </p>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-6 w-6 shrink-0"
-          onClick={onUse}
-          title="Use this query"
-        >
-          <Play className="h-3 w-3" />
-        </Button>
       </div>
 
       {entry.tags.length > 0 && (
