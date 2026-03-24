@@ -156,11 +156,20 @@ if (missing.length > 0) {
 
 log('Installing npm packages...\n');
 try {
-  execSync('npm install', { stdio: 'inherit' });
+  // On Windows, use npm.cmd explicitly to avoid PowerShell execution policy issues with npm.ps1
+  const npmCmd = isWindows ? 'npm.cmd' : 'npm';
+  execSync(`${npmCmd} install`, { stdio: 'inherit' });
   log('');
   ok('npm packages installed');
-} catch {
-  fail('npm install failed');
+} catch (e) {
+  if (isWindows && String(e).includes('cannot be loaded')) {
+    fail('npm.ps1 blocked by PowerShell execution policy');
+    log(`\n${YELLOW}Fix: run this command in PowerShell, then retry:${RESET}`);
+    log(`  ${BOLD}Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned${RESET}\n`);
+    log(`Or use Command Prompt (cmd.exe) instead of PowerShell.\n`);
+  } else {
+    fail('npm install failed');
+  }
   process.exit(1);
 }
 
@@ -196,7 +205,7 @@ if (existsSync('.env.local')) {
 
 log(`\n${GREEN}${BOLD}=== Setup complete ===${RESET}\n`);
 log('Start the app:');
-log(`  ${BOLD}npm run dev${RESET}\n`);
+log(`  ${BOLD}${isWindows ? 'npm.cmd' : 'npm'} run dev${RESET}\n`);
 log(`Then open ${BOLD}http://localhost:3000${RESET}\n`);
 
 // --- Helper ---

@@ -147,6 +147,8 @@ export interface SettingValue {
 
 /** Get all managed settings with their current values (masked for secrets). */
 export function getAllSettings(): SettingValue[] {
+  // Re-read .env.local to pick up changes made outside the running process
+  initEnvOverrides();
   return MANAGED_KEYS.map((mk) => {
     const raw = getEnv(mk.key) || '';
     return {

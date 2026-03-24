@@ -1,11 +1,17 @@
 'use client';
 
 import { useState } from 'react';
-import { KeyRound, Loader2, ArrowRight } from 'lucide-react';
+import { KeyRound, Loader2, ArrowRight, Settings } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 
-export function ApiKeyPrompt({ onComplete }: { onComplete: () => void }) {
+export function ApiKeyPrompt({
+  onComplete,
+  onOpenSettings,
+}: {
+  onComplete: () => void;
+  onOpenSettings?: () => void;
+}) {
   const [apiKey, setApiKey] = useState('');
   const [baseUrl, setBaseUrl] = useState('');
   const [saving, setSaving] = useState(false);
@@ -107,9 +113,28 @@ export function ApiKeyPrompt({ onComplete }: { onComplete: () => void }) {
           </Button>
         </form>
 
-        <p className="text-xs text-muted-foreground mt-4 text-center">
-          Your key is saved locally on this server in .env.local
-        </p>
+        <div className="mt-4 flex flex-col items-center gap-2">
+          {onOpenSettings && (
+            <button
+              type="button"
+              onClick={onOpenSettings}
+              className="text-xs text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1"
+            >
+              <Settings className="h-3 w-3" />
+              Configure all settings (Trino, Statsig, GitHub)
+            </button>
+          )}
+          <p className="text-xs text-muted-foreground text-center">
+            Already configured .env.local?{' '}
+            <button
+              type="button"
+              onClick={onComplete}
+              className="underline hover:text-foreground transition-colors"
+            >
+              Skip this step
+            </button>
+          </p>
+        </div>
       </div>
     </div>
   );

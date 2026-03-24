@@ -1141,7 +1141,10 @@ export default function Home() {
     <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
 
     {apiKeyChecked && needsApiKey && (
-      <ApiKeyPrompt onComplete={() => setNeedsApiKey(false)} />
+      <ApiKeyPrompt
+        onComplete={() => setNeedsApiKey(false)}
+        onOpenSettings={() => { setNeedsApiKey(false); setSettingsOpen(true); }}
+      />
     )}
     </>
   );
