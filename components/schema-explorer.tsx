@@ -43,6 +43,8 @@ interface MetadataResponse {
 
 interface SchemaExplorerProps {
   onInsertTable: (fqn: string) => void;
+  /** Increment to trigger a refetch (e.g. after metadata loads) */
+  refreshKey?: number;
 }
 
 function timeAgo(isoDate: string): string {
@@ -53,61 +55,60 @@ function timeAgo(isoDate: string): string {
   return `${Math.floor(seconds / 86400)}d ago`;
 }
 
-export function SchemaExplorer({ onInsertTable }: SchemaExplorerProps) {
+export function SchemaExplorer({ onInsertTable, refreshKey }: SchemaExplorerProps) {
   const [data, setData] = useState<MetadataResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [search, setSearch] = useState('');
   const [copiedFqn, setCopiedFqn] = useState<string | null>(null);
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const fetchInFlight = useRef(false);
 
   const fetchMetadata = useCallback(async () => {
+    if (fetchInFlight.current) return null;
+    fetchInFlight.current = true;
     try {
       const res = await fetch('/api/metadata');
       if (res.ok) {
         const json: MetadataResponse = await res.json();
         setData(json);
-        if (!json.isRefreshing && refreshing) {
-          setRefreshing(false);
-        }
+        if (!json.isRefreshing) setRefreshing(false);
         return json;
       }
     } catch {
       // silently fail
+    } finally {
+      fetchInFlight.current = false;
     }
     return null;
-  }, [refreshing]);
+  }, []);
 
   // Initial fetch
   useEffect(() => {
     fetchMetadata().finally(() => setLoading(false));
-  }, [fetchMetadata]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  // Poll while refreshing
+  // Refetch when refreshKey changes (metadata loaded by agent loop)
+  const prevRefreshKey = useRef(refreshKey);
   useEffect(() => {
-    if (!refreshing) {
-      if (pollRef.current) {
-        clearInterval(pollRef.current);
-        pollRef.current = null;
-      }
-      return;
+    if (refreshKey !== prevRefreshKey.current) {
+      prevRefreshKey.current = refreshKey;
+      fetchMetadata();
     }
-    pollRef.current = setInterval(async () => {
-      const result = await fetchMetadata();
-      if (result && !result.isRefreshing) {
-        setRefreshing(false);
-      }
-    }, 2000);
-    return () => {
-      if (pollRef.current) clearInterval(pollRef.current);
-    };
-  }, [refreshing, fetchMetadata]);
+  }, [refreshKey, fetchMetadata]);
 
   const handleRefresh = async () => {
     setRefreshing(true);
     try {
-      await fetch('/api/metadata', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+      await fetch('/api/metadata', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ priorityOnly: true }),
+      });
+      await fetchMetadata();
     } catch {
+      // silently fail
+    } finally {
       setRefreshing(false);
     }
   };
@@ -172,11 +173,11 @@ export function SchemaExplorer({ onInsertTable }: SchemaExplorerProps) {
       {/* Stats + refresh */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
+          <Badge variant="secondary" className="text-xs px-1.5 py-0">
             {data?.tableCount ?? 0} tables
           </Badge>
           {data?.lastRefreshed && (
-            <span className="text-[10px] text-muted-foreground">
+            <span className="text-xs text-muted-foreground">
               {timeAgo(data.lastRefreshed)}
             </span>
           )}
@@ -299,7 +300,7 @@ function SchemaNode({
         <Folder className="h-3 w-3 text-muted-foreground group-data-[open]:hidden" />
         <FolderOpen className="h-3 w-3 text-muted-foreground hidden group-data-[open]:block" />
         <span className="truncate">{schema}</span>
-        <Badge variant="secondary" className="ml-auto text-[9px] px-1 py-0">
+        <Badge variant="secondary" className="ml-auto text-xs px-1 py-0">
           {tables.length}
         </Badge>
       </Collapsible.Trigger>
@@ -360,14 +361,14 @@ function TableNode({
         {columns.map((col) => (
           <div
             key={col.name}
-            className="flex items-center justify-between gap-2 px-1.5 py-0.5 text-[11px]"
+            className="flex items-center justify-between gap-2 px-1.5 py-0.5 text-xs"
             title={col.comment || undefined}
           >
             <span className="truncate text-sidebar-foreground/80">
               <Columns3 className="mr-1 inline h-2.5 w-2.5 text-muted-foreground" />
               {col.name}
             </span>
-            <span className="shrink-0 font-mono text-[10px] text-muted-foreground">
+            <span className="shrink-0 font-mono text-xs text-muted-foreground">
               {col.type}
             </span>
           </div>

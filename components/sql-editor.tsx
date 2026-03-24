@@ -3,7 +3,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
-import { Play, Copy, Check, Pencil, X } from 'lucide-react';
+import { Play, Copy, Check, Pencil, X, ChevronRight, Code2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 
@@ -12,6 +12,8 @@ interface SQLEditorProps {
   onExecute: (sql: string) => void;
   isExecuting: boolean;
   streaming?: boolean;
+  /** Start collapsed — user can click to expand */
+  defaultCollapsed?: boolean;
 }
 
 export function SQLEditor({
@@ -19,10 +21,12 @@ export function SQLEditor({
   onExecute,
   isExecuting,
   streaming = false,
+  defaultCollapsed = false,
 }: SQLEditorProps) {
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState(sql);
   const [copied, setCopied] = useState(false);
+  const [collapsed, setCollapsed] = useState(defaultCollapsed);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Sync editValue when sql prop changes (streaming)
@@ -56,6 +60,7 @@ export function SQLEditor({
   );
 
   const startEditing = useCallback(() => {
+    setCollapsed(false);
     setEditing(true);
     setTimeout(() => textareaRef.current?.focus(), 0);
   }, []);
@@ -64,7 +69,16 @@ export function SQLEditor({
     <div className="group relative rounded-xl border border-border bg-zinc-950 overflow-hidden shadow-sm">
       {/* Toolbar */}
       <div className="flex items-center justify-between border-b border-white/10 px-4 py-2">
-        <span className="text-xs font-medium text-zinc-400">SQL</span>
+        <button
+          onClick={() => setCollapsed((c) => !c)}
+          className="flex items-center gap-1.5 text-base font-medium text-zinc-400 hover:text-zinc-200 transition-colors"
+        >
+          <ChevronRight
+            className={`h-3.5 w-3.5 transition-transform ${collapsed ? '' : 'rotate-90'}`}
+          />
+          <Code2 className="h-3.5 w-3.5" />
+          SQL
+        </button>
         <div className="flex items-center gap-1">
           <Tooltip>
             <TooltipTrigger
@@ -93,7 +107,7 @@ export function SQLEditor({
                   disabled={isExecuting}
                 >
                   <Play className="h-3 w-3" />
-                  {isExecuting ? 'Running...' : 'Run (⌘E)'}
+                  {isExecuting ? 'Running...' : 'Run'}
                 </TooltipTrigger>
                 <TooltipContent>Run query (⌘E)</TooltipContent>
               </Tooltip>
@@ -102,29 +116,31 @@ export function SQLEditor({
         </div>
       </div>
 
-      {/* Editor / Highlighter */}
-      {editing ? (
-        <textarea
-          ref={textareaRef}
-          value={editValue}
-          onChange={(e) => setEditValue(e.target.value)}
-          onKeyDown={handleKeyDown}
-          className="w-full min-h-[80px] resize-y bg-zinc-950 p-4 font-mono text-sm text-zinc-100 focus:outline-none"
-          spellCheck={false}
-        />
-      ) : (
-        <SyntaxHighlighter
-          language="sql"
-          style={oneDark}
-          customStyle={{
-            margin: 0,
-            padding: '1rem',
-            background: 'transparent',
-            fontSize: '0.875rem',
-          }}
-        >
-          {sql || '-- Generating SQL...'}
-        </SyntaxHighlighter>
+      {/* Editor / Highlighter — collapsible */}
+      {!collapsed && (
+        editing ? (
+          <textarea
+            ref={textareaRef}
+            value={editValue}
+            onChange={(e) => setEditValue(e.target.value)}
+            onKeyDown={handleKeyDown}
+            className="w-full min-h-[80px] resize-y bg-zinc-950 p-4 font-mono text-sm text-zinc-100 focus:outline-none"
+            spellCheck={false}
+          />
+        ) : (
+          <SyntaxHighlighter
+            language="sql"
+            style={oneDark}
+            customStyle={{
+              margin: 0,
+              padding: '1rem',
+              background: 'transparent',
+              fontSize: '1rem',
+            }}
+          >
+            {sql || '-- Generating SQL...'}
+          </SyntaxHighlighter>
+        )
       )}
     </div>
   );

@@ -50,7 +50,7 @@ export function validateSQL(sql: string): ValidationResult {
     const match = cleanedSQL.match(BLOCKED_REGEX);
     return {
       valid: false,
-      error: `This app only supports read queries (SELECT, SHOW, DESCRIBE). Modification statements like ${match?.[0]?.toUpperCase()} are not allowed.`,
+      error: `This app only supports read queries (SELECT). Modification statements like ${match?.[0]?.toUpperCase()} are not allowed.`,
     };
   }
 

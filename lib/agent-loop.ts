@@ -10,12 +10,13 @@ import {
   checkDateCompleteness,
   parseChartConfigFromAnalysis,
 } from './anthropic';
-import { findRelevantTables, ensureMetadataLoading } from './metadata';
+import { findRelevantTables, ensureMetadataLoading, waitForRefresh, waitForPrioritySchemas, getMetadataCache, triggerBackgroundRefresh } from './metadata';
 import { matchQueries, loadQueryLibrary, getQueryLibrary } from './query-matcher';
 import { validateSQL } from './sql-validator';
 import { executeTrinoMCP } from './trino-mcp';
 
 const MAX_ITERATIONS = 3;
+const PROGRESS_POLL_MS = 2500;
 
 const encoder = new TextEncoder();
 
@@ -94,6 +95,37 @@ function extractTablesFromSQL(sql: string): string[] {
 }
 
 /**
+ * Wait for priority schemas while emitting progress events to the client.
+ */
+async function waitWithProgress(
+  controller: ReadableStreamDefaultController,
+  waitFn: () => Promise<void>,
+  label: string
+): Promise<void> {
+  let done = false;
+  const waitPromise = waitFn().then(() => { done = true; });
+
+  while (!done) {
+    const finished = await Promise.race([
+      waitPromise.then(() => true as const),
+      new Promise<false>((r) => setTimeout(() => r(false), PROGRESS_POLL_MS)),
+    ]);
+    if (finished) break;
+
+    const cache = getMetadataCache();
+    const tableCount = cache?.tables.length || 0;
+    const schemasDone = cache
+      ? [...new Set(cache.tables.map((t) => t.schema))].length
+      : 0;
+
+    emit(controller, {
+      type: 'progress',
+      content: `${label} — ${schemasDone} schema${schemasDone !== 1 ? 's' : ''}, ${tableCount} table${tableCount !== 1 ? 's' : ''} loaded so far...`,
+    });
+  }
+}
+
+/**
  * Build a list of alternative tables the agent hasn't tried yet.
  */
 function getUnusedTables(
@@ -114,12 +146,66 @@ export function runAgentLoop(question: string, history?: ConversationTurn[]): Re
   return new ReadableStream({
     async start(controller) {
       try {
-        // Load context
+        // Load context — wait for metadata so the LLM has table/column info
         if (getQueryLibrary().length === 0) loadQueryLibrary();
         ensureMetadataLoading();
 
-        const relevantTables = findRelevantTables(question);
+        // Block until priority schemas are loaded (first load) so the LLM
+        // never generates SQL without knowing the actual schema
+        if (!getMetadataCache()) {
+          emit(controller, {
+            type: 'thinking',
+            iteration: 1,
+            content: 'Loading priority schemas...',
+          });
+          await waitWithProgress(controller, waitForPrioritySchemas, 'Loading priority schemas');
+          const cache = getMetadataCache();
+          emit(controller, { type: 'metadata_ready', tableCount: cache?.tables.length || 0 });
+        }
+
+        let relevantTables = findRelevantTables(question);
         const relevantQueries = matchQueries(question);
+
+        // If no relevant tables found, check if we have ANY metadata loaded
+        if (relevantTables.length === 0) {
+          const cache = getMetadataCache();
+          const hasMetadata = cache && cache.tables.length > 0;
+
+          if (!hasMetadata) {
+            // No metadata at all — try a forced refresh, wait for priority schemas only
+            emit(controller, {
+              type: 'thinking',
+              iteration: 1,
+              content: 'No table metadata available. Refreshing priority schemas...',
+            });
+            triggerBackgroundRefresh(true);
+            await waitWithProgress(controller, waitForPrioritySchemas, 'Refreshing priority schemas');
+            const refreshedCache = getMetadataCache();
+            emit(controller, { type: 'metadata_ready', tableCount: refreshedCache?.tables.length || 0 });
+            relevantTables = findRelevantTables(question);
+          }
+
+          // After refresh: still no relevant tables?
+          if (relevantTables.length === 0) {
+            if (relevantQueries.length > 0) {
+              // Query library has references — proceed with those
+              emit(controller, {
+                type: 'thinking',
+                iteration: 1,
+                content: 'No exact table matches found, but using query library references.',
+              });
+            } else {
+              // Nothing available — ask user to refresh metadata
+              emit(controller, {
+                type: 'needs_metadata',
+                content: 'No table metadata is available for this question. Please refresh the schema metadata from the sidebar, then try again.',
+                question,
+              });
+              emit(controller, { type: 'done', iterations: 0, finalIteration: 0 });
+              return;
+            }
+          }
+        }
 
         let currentSQL = '';
         let currentResults: QueryResult | null = null;
@@ -173,12 +259,29 @@ export function runAgentLoop(question: string, history?: ConversationTurn[]): Re
           const explanation = extractExplanation(llmResponse);
 
           if (!sql) {
-            emit(controller, {
-              type: 'error',
-              content: 'LLM did not generate a SQL query. ' + explanation,
-              iteration,
-            });
-            break;
+            // LLM didn't generate SQL — could be a direct answer or a clarification question.
+            // Heuristic: if the response is long and contains markdown formatting (headers, tables,
+            // bullets), it's a direct answer; if it's short or ends with a question, it's a clarification.
+            const isDirectAnswer =
+              explanation.length > 200 ||
+              /^#{1,3}\s/m.test(explanation) ||
+              /^\|.+\|$/m.test(explanation) ||
+              /^[\-\*]\s/m.test(explanation);
+
+            if (isDirectAnswer) {
+              // Stream as analysis so it gets proper markdown rendering
+              for (let i = 0; i < explanation.length; i += 100) {
+                const chunk = explanation.slice(i, i + 100);
+                emit(controller, { type: 'analysis_chunk', delta: chunk });
+              }
+            } else {
+              emit(controller, {
+                type: 'clarification',
+                content: explanation || 'Could you clarify your question? I need more details to write an accurate query.',
+              });
+            }
+            emit(controller, { type: 'done', iterations: 0, finalIteration: 0 });
+            return;
           }
 
           // Emit final SQL (client switches from streaming view to editor)

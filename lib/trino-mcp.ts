@@ -296,23 +296,172 @@ function parseTextResult(text: string): {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Dedicated MCP metadata tools — use these instead of query_trino for
+// metadata queries. They avoid the LIMIT-appending issue with SHOW/DESCRIBE.
+// ---------------------------------------------------------------------------
+
+const ENV = () => process.env.TRINO_ENVIRONMENT || 'prod';
+
+/**
+ * List schemas in a catalog using the dedicated list_schemas MCP tool.
+ */
+export async function listSchemas(
+  catalog: string = 'lakehouse'
+): Promise<string[]> {
+  const mcpClient = getClient();
+  const result = await mcpClient.callTool('list_schemas', {
+    catalog,
+    environment: ENV(),
+  });
+  const parsed = parseMCPResult(result);
+  // The tool returns rows with a "Schema" or "schema_name" column
+  return parsed.rows.map((row) => {
+    const val = row['Schema'] ?? row['schema_name'] ?? row['schema'] ?? Object.values(row)[0];
+    return String(val || '');
+  }).filter(Boolean);
+}
+
+/**
+ * List tables in a schema using the dedicated list_tables MCP tool.
+ */
+export async function listTables(
+  schema: string,
+): Promise<string[]> {
+  const mcpClient = getClient();
+  const result = await mcpClient.callTool('list_tables', {
+    schema,
+    environment: ENV(),
+  });
+  const parsed = parseMCPResult(result);
+  return parsed.rows.map((row) => {
+    const val = row['Table'] ?? row['table_name'] ?? row['table'] ?? Object.values(row)[0];
+    return String(val || '');
+  }).filter(Boolean);
+}
+
+/**
+ * Describe a table's structure using the dedicated describe_table MCP tool.
+ */
+export async function describeTable(
+  tableName: string,
+  schema: string = 'public',
+): Promise<{ name: string; type: string; comment?: string }[]> {
+  const mcpClient = getClient();
+  const result = await mcpClient.callTool('describe_table', {
+    table_name: tableName,
+    schema,
+    environment: ENV(),
+  });
+  const parsed = parseMCPResult(result);
+  return parsed.rows.map((row) => {
+    const rawComment = row['Comment'] ?? row['comment'];
+    const comment = rawComment && String(rawComment).trim() ? String(rawComment).trim() : undefined;
+    return {
+      name: String(row['Column'] ?? row['column_name'] ?? row['name'] ?? ''),
+      type: String(row['Type'] ?? row['data_type'] ?? row['type'] ?? 'unknown'),
+      comment,
+    };
+  });
+}
+
+/**
+ * Fetch table-level comments for all tables in a schema via system.metadata.table_comments.
+ * Returns a map of tableName → comment.
+ */
+export async function getTableComments(
+  catalog: string,
+  schema: string,
+): Promise<Map<string, string>> {
+  const mcpClient = getClient();
+  const result = await mcpClient.callTool('query_trino', {
+    sql: `SELECT table_name, comment FROM system.metadata.table_comments WHERE catalog_name = '${catalog}' AND schema_name = '${schema}'`,
+    environment: ENV(),
+    limit: 10000,
+  });
+  const parsed = parseMCPResult(result);
+  const map = new Map<string, string>();
+  for (const row of parsed.rows) {
+    const name = String(row['table_name'] ?? '');
+    const comment = row['comment'];
+    if (name && comment && String(comment).trim()) {
+      map.set(name, String(comment).trim());
+    }
+  }
+  return map;
+}
+
+/**
+ * Route SHOW/DESCRIBE SQL to dedicated MCP metadata tools.
+ * Returns null if the SQL is not a metadata command.
+ */
+async function routeMetadataCommand(sql: string): Promise<{
+  columns: string[];
+  columnTypes: string[];
+  rows: Record<string, unknown>[];
+} | null> {
+  const trimmed = sql.trim();
+
+  // SHOW SCHEMAS FROM <catalog>
+  const showSchemas = trimmed.match(/^SHOW\s+SCHEMAS\s+FROM\s+(\w+)/i);
+  if (showSchemas) {
+    const names = await listSchemas(showSchemas[1]);
+    return {
+      columns: ['schema_name'],
+      columnTypes: ['varchar'],
+      rows: names.map((n) => ({ schema_name: n })),
+    };
+  }
+
+  // SHOW TABLES FROM <catalog>.<schema>  or  SHOW TABLES FROM <schema>
+  const showTables = trimmed.match(/^SHOW\s+TABLES\s+FROM\s+(?:\w+\.)?(\w+)/i);
+  if (showTables) {
+    const names = await listTables(showTables[1]);
+    return {
+      columns: ['table_name'],
+      columnTypes: ['varchar'],
+      rows: names.map((n) => ({ table_name: n })),
+    };
+  }
+
+  // DESCRIBE <catalog>.<schema>.<table>  or  DESCRIBE <schema>.<table>
+  const describe3 = trimmed.match(/^DESCRIBE\s+\w+\.(\w+)\.(\w+)/i);
+  const describe2 = trimmed.match(/^DESCRIBE\s+(\w+)\.(\w+)/i);
+  const descMatch = describe3 ?? describe2;
+  if (descMatch) {
+    const schema = descMatch[1];
+    const table = descMatch[2];
+    const cols = await describeTable(table, schema);
+    return {
+      columns: ['column_name', 'data_type', 'comment'],
+      columnTypes: ['varchar', 'varchar', 'varchar'],
+      rows: cols.map((c) => ({ column_name: c.name, data_type: c.type, comment: c.comment ?? null })),
+    };
+  }
+
+  return null;
+}
+
 /**
  * Execute a SQL query via the Trino MCP server subprocess.
+ * SHOW/DESCRIBE statements are automatically routed to dedicated MCP
+ * metadata tools (list_schemas, list_tables, describe_table) to avoid
+ * the LIMIT-appending issue with query_trino.
  */
 export async function executeTrinoMCP(sql: string): Promise<{
   columns: string[];
   columnTypes: string[];
   rows: Record<string, unknown>[];
 }> {
+  // Route metadata commands to dedicated tools
+  const metadataResult = await routeMetadataCommand(sql);
+  if (metadataResult) return metadataResult;
+
   const mcpClient = getClient();
-
-  // SHOW/DESCRIBE/EXPLAIN commands don't support LIMIT in Trino
-  const isMetadataCommand = /^\s*(SHOW|DESCRIBE|EXPLAIN)\b/i.test(sql);
-
   const result = await mcpClient.callTool('query_trino', {
     sql,
-    environment: process.env.TRINO_ENVIRONMENT || 'preprod',
-    ...(isMetadataCommand ? {} : { limit: 10000 }),
+    environment: ENV(),
+    limit: 10000,
   });
 
   return parseMCPResult(result);

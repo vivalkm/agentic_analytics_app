@@ -5,6 +5,7 @@ import {
   triggerBackgroundRefresh,
   isRefreshing,
   waitForRefresh,
+  waitForPrioritySchemas,
 } from '@/lib/metadata';
 
 export async function GET() {
@@ -31,10 +32,14 @@ export async function POST(request: Request) {
   try {
     const body = await request.json().catch(() => ({}));
     const blocking = body?.blocking === true;
+    const priorityOnly = body?.priorityOnly === true;
 
     triggerBackgroundRefresh(/* force */ true);
 
-    if (blocking) {
+    if (priorityOnly) {
+      // Wait only for priority schemas (e.g. fpa) — much faster
+      await waitForPrioritySchemas();
+    } else if (blocking) {
       await waitForRefresh();
     }
 

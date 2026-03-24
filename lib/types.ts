@@ -15,7 +15,7 @@ export interface ColumnMetadata {
 
 export interface NotebookCell {
   id: string;
-  type: 'question' | 'sql' | 'results' | 'analysis' | 'error' | 'thinking';
+  type: 'question' | 'sql' | 'results' | 'analysis' | 'error' | 'thinking' | 'clarification' | 'needs_metadata';
   content: string;
   timestamp: number;
   metadata?: {
@@ -75,7 +75,11 @@ export type AgentEvent =
   | { type: 'validation'; iteration: number; valid: boolean; reason: string; suggestion?: string }
   | { type: 'analysis_chunk'; delta: string }
   | { type: 'done'; iterations: number; finalIteration: number; chartConfig?: ChartConfig }
-  | { type: 'error'; content: string; iteration?: number };
+  | { type: 'error'; content: string; iteration?: number }
+  | { type: 'clarification'; content: string }
+  | { type: 'needs_metadata'; content: string; question: string }
+  | { type: 'metadata_ready'; tableCount: number }
+  | { type: 'progress'; content: string };
 
 export interface ValidationResult {
   valid: boolean;

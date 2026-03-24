@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { ChatInput } from '@/components/chat-input';
 import { SQLEditor } from '@/components/sql-editor';
-import { AnalysisCard } from '@/components/analysis-card';
+import { AnalysisCard, renderMarkdown } from '@/components/analysis-card';
 import { ThinkingStep } from '@/components/thinking-step';
 import { ChartRenderer } from '@/components/chart-renderer';
 import { CSVDownload } from '@/components/csv-download';
@@ -13,7 +13,7 @@ import { loadSession, saveSession, generateCellId } from '@/lib/session';
 import { detectChartType } from '@/lib/chart-detector';
 import { SchemaExplorer } from '@/components/schema-explorer';
 import { QueryLibrary } from '@/components/query-library';
-import { Database, Trash2, Loader2, Sparkles, Play, Search, CheckCircle2, PanelLeft, PanelLeftClose, Menu, ArrowDown, Sun, Moon, Keyboard } from 'lucide-react';
+import { Database, Trash2, Loader2, Sparkles, Play, Search, CheckCircle2, PanelLeft, PanelLeftClose, Menu, ArrowDown, Sun, Moon, Keyboard, MessageCircleQuestion, RefreshCw, DatabaseZap } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet';
@@ -71,6 +71,8 @@ export default function Home() {
   const [prefillValue, setPrefillValue] = useState('');
   const [prefillKey, setPrefillKey] = useState(0);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
+  const [statusText, setStatusText] = useState('');
+  const [schemaVersion, setSchemaVersion] = useState(0);
   const [mounted, setMounted] = useState(false);
   const { theme, setTheme } = useTheme();
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -131,9 +133,13 @@ export default function Home() {
   }, []);
 
   const updateCell = useCallback(
-    (id: string, updates: Partial<NotebookCell>) => {
+    (id: string, updates: Partial<NotebookCell> | ((prev: NotebookCell) => Partial<NotebookCell>)) => {
       setCells((prev) =>
-        prev.map((c) => (c.id === id ? { ...c, ...updates } : c))
+        prev.map((c) => {
+          if (c.id !== id) return c;
+          const resolved = typeof updates === 'function' ? updates(c) : updates;
+          return { ...c, ...resolved };
+        })
       );
     },
     []
@@ -187,6 +193,7 @@ export default function Home() {
 
       // Track cell IDs per iteration for updating
       const sqlCellIds: Record<number, string> = {};
+      const thinkingCellIds: Record<number, string> = {};
       let analysisCellId: string | null = null;
       let analysisText = '';
       let latestResultsCellId: string | null = null;
@@ -243,17 +250,29 @@ export default function Home() {
               case 'thinking': {
                 setAgentPhase(event.iteration > 1 ? 'retrying' : 'validating');
                 setAgentIteration(event.iteration);
-                addCell({
-                  id: generateCellId(),
-                  type: 'thinking',
-                  content: event.content,
-                  timestamp: Date.now(),
-                  metadata: {
-                    agentRunId,
-                    iteration: event.iteration,
-                    collapsed: false,
-                  },
-                });
+                setStatusText(event.content);
+
+                const existingThinkingId = thinkingCellIds[event.iteration];
+                if (existingThinkingId) {
+                  // Append to existing thinking cell for this iteration
+                  updateCell(existingThinkingId, (prev) => ({
+                    content: prev.content + '\n' + event.content,
+                  }));
+                } else {
+                  const thinkingId = generateCellId();
+                  thinkingCellIds[event.iteration] = thinkingId;
+                  addCell({
+                    id: thinkingId,
+                    type: 'thinking',
+                    content: event.content,
+                    timestamp: Date.now(),
+                    metadata: {
+                      agentRunId,
+                      iteration: event.iteration,
+                      collapsed: false,
+                    },
+                  });
+                }
                 break;
               }
 
@@ -261,6 +280,7 @@ export default function Home() {
                 // Start streaming SQL generation
                 setAgentPhase('generating');
                 setAgentIteration(event.iteration);
+                setStatusText('');
                 currentStreamingIteration = event.iteration;
                 setStreamingSQL('');
                 break;
@@ -273,7 +293,7 @@ export default function Home() {
               }
 
               case 'sql': {
-                // SQL generation complete — clear streaming state and add final cell
+                // SQL generation complete — clear streaming state
                 setStreamingSQL('');
                 setAgentPhase('executing');
                 setAgentIteration(event.iteration);
@@ -285,26 +305,42 @@ export default function Home() {
                   }
                 }
 
-                const sqlCellId = generateCellId();
-                sqlCellIds[event.iteration] = sqlCellId;
-                addCell({
-                  id: sqlCellId,
-                  type: 'sql',
-                  content: event.sql,
-                  timestamp: Date.now(),
-                  metadata: {
-                    sql: event.sql,
-                    question,
-                    assumptions: event.explanation,
-                    agentRunId,
-                    iteration: event.iteration,
-                  },
-                });
+                const existingSqlId = sqlCellIds[event.iteration];
+                if (existingSqlId) {
+                  // Update existing SQL cell for this iteration (e.g. after review correction)
+                  updateCell(existingSqlId, {
+                    content: event.sql,
+                    metadata: {
+                      sql: event.sql,
+                      question,
+                      assumptions: event.explanation,
+                      agentRunId,
+                      iteration: event.iteration,
+                    },
+                  });
+                } else {
+                  const sqlCellId = generateCellId();
+                  sqlCellIds[event.iteration] = sqlCellId;
+                  addCell({
+                    id: sqlCellId,
+                    type: 'sql',
+                    content: event.sql,
+                    timestamp: Date.now(),
+                    metadata: {
+                      sql: event.sql,
+                      question,
+                      assumptions: event.explanation,
+                      agentRunId,
+                      iteration: event.iteration,
+                    },
+                  });
+                }
                 break;
               }
 
               case 'execution': {
                 setAgentPhase('validating');
+                setStatusText('');
                 const results: QueryResult = {
                   columns: event.columns,
                   columnTypes: event.columnTypes,
@@ -371,6 +407,7 @@ export default function Home() {
 
               case 'analysis_chunk': {
                 setAgentPhase('analyzing');
+                setStatusText('');
                 analysisText += event.delta;
 
                 if (!analysisCellId) {
@@ -413,6 +450,42 @@ export default function Home() {
                 if (event.iterations > 1) {
                   collapseThinkingCells(agentRunId);
                 }
+                break;
+              }
+
+              case 'clarification': {
+                setStreamingSQL('');
+                addCell({
+                  id: generateCellId(),
+                  type: 'clarification',
+                  content: event.content,
+                  timestamp: Date.now(),
+                  metadata: { agentRunId },
+                });
+                break;
+              }
+
+              case 'progress': {
+                // Update status bar only — no new cells
+                setStatusText(event.content);
+                break;
+              }
+
+              case 'metadata_ready': {
+                // Schema loaded — bump version so sidebar refetches
+                setSchemaVersion((v) => v + 1);
+                break;
+              }
+
+              case 'needs_metadata': {
+                setStreamingSQL('');
+                addCell({
+                  id: generateCellId(),
+                  type: 'needs_metadata',
+                  content: event.content,
+                  timestamp: Date.now(),
+                  metadata: { agentRunId, question: event.question },
+                });
                 break;
               }
 
@@ -573,7 +646,7 @@ export default function Home() {
       </TabsList>
       <TabsContent value="schema" className="flex-1 overflow-hidden">
         <ScrollArea className="h-full">
-          <SchemaExplorer onInsertTable={handleInsertTable} />
+          <SchemaExplorer onInsertTable={handleInsertTable} refreshKey={schemaVersion} />
         </ScrollArea>
       </TabsContent>
       <TabsContent value="library" className="flex-1 overflow-hidden">
@@ -597,11 +670,11 @@ export default function Home() {
         {sidebarOpen && sidebarContent}
       </aside>
 
-      {/* Mobile sidebar (Sheet) */}
+      {/* Mobile sidebar (Sheet) — only mount content when open to avoid duplicate fetches */}
       <Sheet open={mobileSheetOpen} onOpenChange={setMobileSheetOpen}>
         <SheetContent side="left" className="w-[300px] p-0 bg-sidebar text-sidebar-foreground">
           <SheetTitle className="sr-only">Navigation</SheetTitle>
-          {sidebarContent}
+          {mobileSheetOpen && sidebarContent}
         </SheetContent>
       </Sheet>
 
@@ -719,20 +792,21 @@ export default function Home() {
               <h2 className="text-2xl font-bold tracking-tight text-foreground">
                 Lakehouse Analytics
               </h2>
-              <p className="mt-3 max-w-lg text-[0.9rem] leading-relaxed text-muted-foreground">
+              <p className="mt-3 max-w-lg text-lg leading-relaxed text-muted-foreground">
                 Ask questions about your data in plain English. I&apos;ll generate
                 SQL, run it against your Trino lakehouse, and analyze the results.
               </p>
               <div className="mt-8 flex flex-wrap justify-center gap-2.5">
                 {[
-                  'Show me the top 10 customers by lifetime value',
-                  'What is the daily revenue trend this quarter?',
-                  'Which products have the highest return rate?',
+                  'What is the monthly revenue trend for the last 12 months?',
+                  'Show daily send volume trend for the last 30 days',
+                  'How does actual revenue compare to forecast this quarter?',
+                  'What tables and columns are available in the fpa schema?',
                 ].map((q) => (
                   <button
                     key={q}
                     onClick={() => streamAgentResponse(q)}
-                    className="rounded-full border border-border bg-card px-4 py-2 text-[0.8rem] text-muted-foreground shadow-sm transition-all hover:border-primary/50 hover:text-foreground hover:shadow-md"
+                    className="rounded-full border border-border bg-card px-4 py-2.5 text-base text-muted-foreground shadow-sm transition-all hover:border-primary/50 hover:text-foreground hover:shadow-md"
                   >
                     {q}
                   </button>
@@ -754,7 +828,7 @@ export default function Home() {
                     <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-foreground shadow-sm">
                       Q
                     </div>
-                    <p className="pt-1.5 text-[0.9rem] font-medium leading-relaxed text-foreground">
+                    <p className="pt-1.5 text-lg font-medium leading-relaxed text-foreground">
                       {cell.content}
                     </p>
                   </div>
@@ -778,6 +852,15 @@ export default function Home() {
                     onExecute={handleExecuteFromEditor}
                     isExecuting={isExecuting}
                     streaming={false}
+                    defaultCollapsed={
+                      // Collapse SQL once analysis is rendered for this run
+                      !!cell.metadata?.agentRunId &&
+                      cells.some(
+                        (c) =>
+                          c.type === 'analysis' &&
+                          c.metadata?.agentRunId === cell.metadata?.agentRunId
+                      )
+                    }
                   />
                 )}
 
@@ -786,7 +869,7 @@ export default function Home() {
                   cell.metadata?.results && (
                     <div className="space-y-3">
                       <div className="flex items-center gap-2 px-1">
-                        <span className="text-[0.8rem] text-muted-foreground">
+                        <span className="text-base text-muted-foreground">
                           {cell.metadata.results.rowCount} rows returned
                           {cell.metadata.results.executionTimeMs > 0 &&
                             ` in ${cell.metadata.results.executionTimeMs}ms`}
@@ -814,8 +897,74 @@ export default function Home() {
                 )}
 
                 {cell.type === 'error' && (
-                  <div className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-[0.85rem] text-destructive">
+                  <div className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-base text-destructive">
                     {cell.content}
+                  </div>
+                )}
+
+                {cell.type === 'clarification' && (
+                  <div className="flex items-start gap-3">
+                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-amber-500/10 text-amber-500">
+                      <MessageCircleQuestion className="h-4 w-4" />
+                    </div>
+                    <div className="flex-1 rounded-xl border border-amber-500/20 bg-amber-500/5 px-4 py-3">
+                      <p className="mb-1 text-base font-medium text-amber-500">Clarification needed</p>
+                      <div
+                        className="prose prose-sm max-w-none text-base leading-relaxed text-foreground"
+                        dangerouslySetInnerHTML={{ __html: renderMarkdown(cell.content) }}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {cell.type === 'needs_metadata' && (
+                  <div className="flex items-start gap-3">
+                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-blue-500/10 text-blue-500">
+                      <DatabaseZap className="h-4 w-4" />
+                    </div>
+                    <div className="flex-1 rounded-xl border border-blue-500/20 bg-blue-500/5 px-4 py-3">
+                      <p className="mb-1 text-base font-medium text-blue-500">Schema metadata required</p>
+                      <p className="text-base leading-relaxed text-muted-foreground">
+                        {cell.content}
+                      </p>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="mt-3 gap-1.5 text-base"
+                        disabled={isLoading}
+                        onClick={async () => {
+                          updateCell(cell.id, { content: 'Refreshing priority schemas (fpa, marketing, public)...' });
+                          try {
+                            const res = await fetch('/api/metadata', {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ priorityOnly: true }),
+                            });
+                            const data = await res.json();
+                            if (res.ok && data.tableCount > 0) {
+                              updateCell(cell.id, {
+                                content: `Priority schemas loaded — ${data.tableCount} tables available. Retrying your question...`,
+                              });
+                              const originalQuestion = cell.metadata?.question;
+                              if (originalQuestion) {
+                                streamAgentResponse(originalQuestion);
+                              }
+                            } else {
+                              updateCell(cell.id, {
+                                content: data.error || 'Metadata refresh completed but no tables were found. Check your Trino connection.',
+                              });
+                            }
+                          } catch (err) {
+                            updateCell(cell.id, {
+                              content: `Metadata refresh failed: ${err instanceof Error ? err.message : 'Unknown error'}`,
+                            });
+                          }
+                        }}
+                      >
+                        <RefreshCw className="h-3.5 w-3.5" />
+                        Refresh Metadata & Retry
+                      </Button>
+                    </div>
                   </div>
                 )}
               </div>
@@ -829,7 +978,7 @@ export default function Home() {
                 <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
                 <span className="text-xs font-medium text-zinc-400">Writing SQL...</span>
               </div>
-              <pre className="p-4 text-[0.8rem] leading-relaxed text-zinc-300 font-mono whitespace-pre-wrap overflow-x-auto">
+              <pre className="p-4 text-base leading-relaxed text-zinc-300 font-mono whitespace-pre-wrap overflow-x-auto">
                 {streamingSQL}
                 <span className="inline-block w-1.5 h-4 bg-primary animate-pulse ml-0.5 align-text-bottom" />
               </pre>
@@ -845,8 +994,8 @@ export default function Home() {
                 return (
                   <>
                     <Icon className={`h-4 w-4 ${agentPhase === 'executing' || agentPhase === 'retrying' ? 'animate-spin' : 'animate-pulse'} ${config.color}`} />
-                    <span className="text-[0.85rem] text-muted-foreground">
-                      {config.text}
+                    <span className="text-base text-muted-foreground">
+                      {statusText || config.text}
                     </span>
                   </>
                 );

@@ -1,12 +1,57 @@
+import { writeFileSync, readFileSync, mkdirSync } from 'fs';
+import { join } from 'path';
 import { TableMetadata, MetadataCache } from './types';
-import { executeTrinoMCP } from './trino-mcp';
+import { listSchemas, listTables, describeTable, getTableComments } from './trino-mcp';
 
-let metadataCache: MetadataCache | null = null;
-let refreshInProgress = false;
-let refreshPromise: Promise<void> | null = null;
+// --- Disk persistence ---
+const CACHE_DIR = join(process.cwd(), '.cache');
+const CACHE_FILE = join(CACHE_DIR, 'metadata.json');
 
-// Refresh at most once per 24 hours unless forced
-const REFRESH_INTERVAL_MS = 24 * 60 * 60 * 1000;
+function loadCacheFromDisk(): MetadataCache | null {
+  try {
+    const raw = readFileSync(CACHE_FILE, 'utf-8');
+    const parsed = JSON.parse(raw) as MetadataCache;
+    if (parsed?.tables?.length > 0) {
+      console.log(`[metadata] Loaded ${parsed.tables.length} tables from disk cache (${parsed.lastRefreshed})`);
+      return parsed;
+    }
+  } catch {
+    // No cache file or invalid — that's fine
+  }
+  return null;
+}
+
+function saveCacheToDisk(cache: MetadataCache): void {
+  try {
+    mkdirSync(CACHE_DIR, { recursive: true });
+    writeFileSync(CACHE_FILE, JSON.stringify(cache), 'utf-8');
+  } catch (e) {
+    console.error('[metadata] Failed to write disk cache:', e);
+  }
+}
+
+// --- In-memory state (globalThis survives hot reloads, disk survives restarts) ---
+const g = globalThis as typeof globalThis & {
+  __metadataCache?: MetadataCache | null;
+  __metadataRefreshInProgress?: boolean;
+  __metadataRefreshPromise?: Promise<void> | null;
+  __metadataPriorityResolve?: (() => void) | null;
+  __metadataPriorityPromise?: Promise<void> | null;
+};
+
+let metadataCache: MetadataCache | null = g.__metadataCache ?? loadCacheFromDisk();
+let refreshInProgress = g.__metadataRefreshInProgress ?? false;
+let refreshPromise: Promise<void> | null = g.__metadataRefreshPromise ?? null;
+let priorityResolve: (() => void) | null = g.__metadataPriorityResolve ?? null;
+let priorityPromise: Promise<void> | null = g.__metadataPriorityPromise ?? null;
+
+function syncToGlobal() {
+  g.__metadataCache = metadataCache;
+  g.__metadataRefreshInProgress = refreshInProgress;
+  g.__metadataRefreshPromise = refreshPromise;
+  g.__metadataPriorityResolve = priorityResolve;
+  g.__metadataPriorityPromise = priorityPromise;
+}
 
 /**
  * Read priority config from env vars.
@@ -44,6 +89,7 @@ export function getMetadataCache(): MetadataCache | null {
 
 export function setMetadataCache(cache: MetadataCache): void {
   metadataCache = cache;
+  syncToGlobal();
 }
 
 export function isRefreshing(): boolean {
@@ -58,23 +104,41 @@ export function isRefreshing(): boolean {
 export function triggerBackgroundRefresh(force = false): void {
   if (refreshInProgress) return;
 
-  if (!force && metadataCache?.lastRefreshed) {
-    const age = Date.now() - new Date(metadataCache.lastRefreshed).getTime();
-    if (age < REFRESH_INTERVAL_MS) return;
-  }
+  // Only refresh when forced (user clicked Refresh) or cache has no tables
+  if (!force && metadataCache && metadataCache.tables.length > 0) return;
 
   refreshInProgress = true;
+
+  // Create a promise that resolves when priority schemas are loaded
+  priorityPromise = new Promise<void>((resolve) => {
+    priorityResolve = resolve;
+  });
 
   refreshPromise = refreshMetadata()
     .catch((err) => console.error('[metadata] Background refresh failed:', err))
     .finally(() => {
       refreshInProgress = false;
       refreshPromise = null;
+      if (priorityResolve) {
+        priorityResolve();
+        priorityResolve = null;
+      }
+      priorityPromise = null;
+      syncToGlobal();
     });
+
+  syncToGlobal();
 }
 
 export async function waitForRefresh(): Promise<void> {
   if (refreshPromise) await refreshPromise;
+}
+
+/**
+ * Wait only until priority schemas (e.g. fpa) are loaded — much faster than waitForRefresh.
+ */
+export async function waitForPrioritySchemas(): Promise<void> {
+  if (priorityPromise) await priorityPromise;
 }
 
 /**
@@ -98,40 +162,36 @@ async function introspectSchema(
   tables: TableMetadata[]
 ): Promise<void> {
   try {
-    // Use information_schema instead of SHOW TABLES (which doesn't support LIMIT)
-    const tableResult = await executeTrinoMCP(
-      `SELECT table_name FROM ${catalog}.information_schema.tables WHERE table_schema = '${schema}'`
-    );
+    // Use dedicated MCP tools instead of query_trino SQL
+    const [tableNames, tableComments] = await Promise.all([
+      listTables(schema),
+      getTableComments(catalog, schema).catch(() => new Map<string, string>()),
+    ]);
 
-    // Batch-fetch all columns for this schema in one query
-    const colResult = await executeTrinoMCP(
-      `SELECT table_name, column_name, data_type, comment FROM ${catalog}.information_schema.columns WHERE table_schema = '${schema}' ORDER BY table_name, ordinal_position`
-    );
-
-    // Group columns by table
-    const columnsByTable = new Map<string, { name: string; type: string; comment?: string }[]>();
-    for (const row of colResult.rows) {
-      const tbl = String(row['table_name'] || '');
-      if (!tbl) continue;
-      if (!columnsByTable.has(tbl)) columnsByTable.set(tbl, []);
-      columnsByTable.get(tbl)!.push({
-        name: String(row['column_name'] || ''),
-        type: String(row['data_type'] || 'unknown'),
-        comment: row['comment'] ? String(row['comment']) : undefined,
-      });
-    }
-
-    for (const row of tableResult.rows) {
-      const tableName = String(row['table_name'] || '');
-      if (!tableName) continue;
-
-      tables.push({
-        catalog,
-        schema,
-        table: tableName,
-        columns: columnsByTable.get(tableName) || [],
-        lastRefreshed: new Date().toISOString(),
-      });
+    // Describe each table to get columns (with column comments)
+    for (const tableName of tableNames) {
+      try {
+        const columns = await describeTable(tableName, schema);
+        tables.push({
+          catalog,
+          schema,
+          table: tableName,
+          columns,
+          comment: tableComments.get(tableName),
+          lastRefreshed: new Date().toISOString(),
+        });
+      } catch (e) {
+        // If describe fails for a single table, still include it with no columns
+        console.error(`[metadata] Failed to describe ${catalog}.${schema}.${tableName}:`, e);
+        tables.push({
+          catalog,
+          schema,
+          table: tableName,
+          columns: [],
+          comment: tableComments.get(tableName),
+          lastRefreshed: new Date().toISOString(),
+        });
+      }
     }
 
     // Update cache progressively
@@ -141,6 +201,7 @@ async function introspectSchema(
       tables: [...tables],
       lastRefreshed: new Date().toISOString(),
     };
+    syncToGlobal();
   } catch (e) {
     console.error(`[metadata] Failed to introspect ${catalog}.${schema}:`, e);
   }
@@ -162,28 +223,23 @@ async function refreshMetadata(): Promise<void> {
   // and are not useful for data queries.
   catalogs.push(config.defaultCatalog);
 
-  metadataCache = { catalogs, schemas: {}, tables: [], lastRefreshed: new Date().toISOString() };
+  // Preserve existing tables while refreshing so progress/sidebar don't flash empty
+  const existingTables = metadataCache?.tables || [];
+  metadataCache = { catalogs, schemas: {}, tables: existingTables, lastRefreshed: new Date().toISOString() };
+  syncToGlobal();
   console.log(`[metadata] Introspecting catalog: ${config.defaultCatalog}`);
 
-  // Step 2: List schemas for the target catalog
+  // Step 2: List schemas for the target catalog using dedicated MCP tool
   for (const catalog of catalogs) {
     try {
-      // Use information_schema instead of SHOW SCHEMAS (which doesn't support LIMIT)
-      const schemaResult = await executeTrinoMCP(
-        `SELECT schema_name FROM ${catalog}.information_schema.schemata`
-      );
-      const schemaNames: string[] = [];
-      for (const row of schemaResult.rows) {
-        const val = String(row['schema_name'] || '');
-        if (val) schemaNames.push(val);
-      }
-      schemas[catalog] = schemaNames;
+      schemas[catalog] = await listSchemas(catalog);
     } catch (e) {
       console.error(`[metadata] Failed to list schemas for ${catalog}:`, e);
     }
   }
 
-  metadataCache = { catalogs, schemas, tables: [], lastRefreshed: new Date().toISOString() };
+  metadataCache = { catalogs, schemas, tables: existingTables, lastRefreshed: new Date().toISOString() };
+  syncToGlobal();
   const totalSchemas = Object.values(schemas).reduce((s, arr) => s + arr.length, 0);
   console.log(`[metadata] Found ${totalSchemas} schemas`);
 
@@ -224,6 +280,14 @@ async function refreshMetadata(): Promise<void> {
       );
     }
 
+    // Signal that priority schemas are ready — callers using waitForPrioritySchemas() unblock here
+    if (priorityResolve) {
+      priorityResolve();
+      priorityResolve = null;
+      syncToGlobal();
+      if (metadataCache) saveCacheToDisk(metadataCache);
+    }
+
     // Then load remaining schemas
     for (const schema of remaining) {
       await introspectSchema(catalog, schema, catalogs, schemas, tables);
@@ -231,6 +295,7 @@ async function refreshMetadata(): Promise<void> {
   }
 
   console.log(`[metadata] Refresh complete: ${tables.length} tables loaded`);
+  if (metadataCache) saveCacheToDisk(metadataCache);
 }
 
 export function findRelevantTables(

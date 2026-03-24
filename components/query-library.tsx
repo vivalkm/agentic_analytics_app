@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { Collapsible } from '@base-ui/react/collapsible';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -29,8 +29,11 @@ export function QueryLibrary({ onUseQuery }: QueryLibraryProps) {
   const [queries, setQueries] = useState<QueryEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const fetched = useRef(false);
 
   useEffect(() => {
+    if (fetched.current) return;
+    fetched.current = true;
     fetch('/api/library')
       .then((res) => res.json())
       .then((data) => setQueries(data.queries || []))
@@ -68,7 +71,7 @@ export function QueryLibrary({ onUseQuery }: QueryLibraryProps) {
       {/* Header */}
       <div className="flex items-center gap-2">
         <span className="text-xs font-medium text-sidebar-foreground">Query Library</span>
-        <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
+        <Badge variant="secondary" className="text-xs px-1.5 py-0">
           {queries.length}
         </Badge>
       </div>
@@ -93,7 +96,7 @@ export function QueryLibrary({ onUseQuery }: QueryLibraryProps) {
           <p className="text-xs text-muted-foreground">
             No saved queries.
           </p>
-          <p className="mt-1 text-[10px] text-muted-foreground/70">
+          <p className="mt-1 text-xs text-muted-foreground/70">
             Add .sql files to the query-library/ directory.
           </p>
         </div>
@@ -149,7 +152,7 @@ function QueryCard({
             <Badge
               key={tag}
               variant="secondary"
-              className="text-[9px] px-1 py-0 cursor-pointer hover:bg-accent"
+              className="text-xs px-1 py-0 cursor-pointer hover:bg-accent"
               onClick={() => onTagClick(tag)}
             >
               {tag}
@@ -159,13 +162,13 @@ function QueryCard({
       )}
 
       <Collapsible.Root>
-        <Collapsible.Trigger className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-sidebar-foreground group">
+        <Collapsible.Trigger className="flex items-center gap-1 text-xs text-muted-foreground hover:text-sidebar-foreground group">
           <ChevronRight className="h-2.5 w-2.5 transition-transform group-data-[open]:rotate-90" />
           <Code2 className="h-2.5 w-2.5" />
           <span>Show SQL</span>
         </Collapsible.Trigger>
         <Collapsible.Panel>
-          <pre className="mt-1.5 rounded bg-zinc-950 p-2 text-[10px] font-mono text-zinc-400 overflow-x-auto max-h-[200px] overflow-y-auto leading-relaxed">
+          <pre className="mt-1.5 rounded bg-zinc-950 p-2 text-xs font-mono text-zinc-400 overflow-x-auto max-h-[200px] overflow-y-auto leading-relaxed">
             {entry.sql.trim()}
           </pre>
         </Collapsible.Panel>

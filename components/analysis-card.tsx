@@ -13,12 +13,21 @@ interface AnalysisCardProps {
 
 function parseFollowUps(text: string): string[] {
   const questions: string[] = [];
-  // Match numbered questions or lines ending with ?
   const lines = text.split('\n');
   for (const line of lines) {
-    const trimmed = line.replace(/^[\d\-\*\.\)]+\s*/, '').trim();
-    if (trimmed.endsWith('?') && trimmed.length > 15) {
-      questions.push(trimmed);
+    // Strip list prefixes (1. / - / * ) and leading/trailing markdown bold/italic
+    const trimmed = line
+      .replace(/^[\d\-\*\.\)]+\s*/, '')
+      .trim()
+      .replace(/^\*{1,2}/, '')
+      .replace(/\*{1,2}$/, '')
+      .trim();
+    if (trimmed.includes('?') && trimmed.length > 15) {
+      // Extract up to the question mark (handles trailing bold, punctuation, etc.)
+      const qMatch = trimmed.match(/^(.+?\?)/);
+      if (qMatch) {
+        questions.push(qMatch[1].trim());
+      }
     }
   }
   return questions.slice(-5); // Last few questions are usually the follow-ups
@@ -45,7 +54,7 @@ function renderTable(tableLines: string[]): string {
   const thCells = headers
     .map(
       (h) =>
-        `<th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground whitespace-nowrap">${inlineFormat(h)}</th>`
+        `<th class="px-3 py-2 text-left text-base font-medium text-muted-foreground whitespace-nowrap">${inlineFormat(h)}</th>`
     )
     .join('');
 
@@ -54,7 +63,7 @@ function renderTable(tableLines: string[]): string {
       const cells = row
         .map(
           (cell) =>
-            `<td class="px-3 py-1.5 text-xs text-foreground/90 whitespace-nowrap font-mono">${inlineFormat(cell)}</td>`
+            `<td class="px-3 py-1.5 text-base text-foreground/90 whitespace-nowrap font-mono">${inlineFormat(cell)}</td>`
         )
         .join('');
       const rowClass = ri % 2 === 1 ? ' class="bg-muted/15"' : '';
@@ -70,10 +79,10 @@ function inlineFormat(text: string): string {
   return text
     .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
     .replace(/\*(.*?)\*/g, '<em>$1</em>')
-    .replace(/`([^`]+)`/g, '<code class="rounded bg-muted px-1 py-0.5 text-xs font-mono">$1</code>');
+    .replace(/`([^`]+)`/g, '<code class="rounded bg-muted px-1 py-0.5 text-base font-mono">$1</code>');
 }
 
-function renderMarkdown(text: string): string {
+export function renderMarkdown(text: string): string {
   // Strip ```chart blocks before rendering (LLM chart config)
   const cleaned = text.replace(/```chart\s*\n?[\s\S]*?```/g, '').trimEnd();
   const lines = cleaned.split('\n');
@@ -102,11 +111,11 @@ function renderMarkdown(text: string): string {
 
     // Headers
     if (/^### (.+)$/.test(line)) {
-      outputParts.push(line.replace(/^### (.+)$/, '<h4 class="font-semibold text-sm mt-3 mb-1">$1</h4>'));
+      outputParts.push(line.replace(/^### (.+)$/, '<h4 class="font-semibold text-lg mt-3 mb-1">$1</h4>'));
       continue;
     }
     if (/^## (.+)$/.test(line)) {
-      outputParts.push(line.replace(/^## (.+)$/, '<h3 class="font-semibold text-base mt-4 mb-1">$1</h3>'));
+      outputParts.push(line.replace(/^## (.+)$/, '<h3 class="font-semibold text-lg mt-4 mb-1">$1</h3>'));
       continue;
     }
     if (/^# (.+)$/.test(line)) {
@@ -152,14 +161,14 @@ export function AnalysisCard({
   return (
     <Card className="border-border bg-card shadow-sm">
       <CardHeader className="pb-2">
-        <CardTitle className="flex items-center gap-2 text-[0.85rem] font-semibold">
+        <CardTitle className="flex items-center gap-2 text-lg font-semibold">
           <Sparkles className="h-4 w-4 text-primary" />
           Analysis
           {streaming && (
             <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
           )}
           {!streaming && iterations && iterations > 1 && (
-            <Badge variant="outline" className="text-[10px] px-1.5 py-0 font-normal text-muted-foreground">
+            <Badge variant="outline" className="text-xs px-1.5 py-0 font-normal text-muted-foreground">
               Resolved after {iterations} attempts
             </Badge>
           )}
@@ -167,18 +176,18 @@ export function AnalysisCard({
       </CardHeader>
       <CardContent>
         <div
-          className="prose prose-sm prose-invert max-w-none text-[0.85rem] leading-relaxed text-foreground"
+          className="prose prose-sm prose-invert max-w-none text-base leading-relaxed text-foreground"
           dangerouslySetInnerHTML={{ __html: renderMarkdown(analysis) }}
         />
 
         {followUps.length > 0 && onFollowUp && (
           <div className="mt-4 flex flex-wrap gap-2 border-t border-border pt-3">
-            <span className="text-xs text-muted-foreground">Follow-up:</span>
+            <span className="text-base text-muted-foreground">Follow-up:</span>
             {followUps.map((q, i) => (
               <Badge
                 key={i}
                 variant="secondary"
-                className="cursor-pointer text-xs hover:bg-accent"
+                className="cursor-pointer text-base hover:bg-accent"
                 onClick={() => onFollowUp(q)}
               >
                 {q.length > 60 ? q.slice(0, 57) + '...' : q}

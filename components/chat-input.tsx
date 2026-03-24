@@ -73,7 +73,7 @@ export function ChatInput({
         placeholder={placeholder}
         disabled={isLoading}
         rows={1}
-        className="flex-1 resize-none bg-transparent text-[0.9rem] leading-relaxed text-foreground placeholder:text-muted-foreground/70 focus:outline-none disabled:opacity-50"
+        className="flex-1 resize-none bg-transparent text-lg leading-relaxed text-foreground placeholder:text-muted-foreground/70 focus:outline-none disabled:opacity-50"
       />
       <Tooltip>
         <TooltipTrigger
