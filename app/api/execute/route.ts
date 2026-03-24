@@ -1,13 +1,8 @@
-import { auth } from '@/auth';
 import { validateSQL } from '@/lib/sql-validator';
 import { executeTrinoMCP } from '@/lib/trino-mcp';
 
 export async function POST(request: Request) {
   try {
-    const session = await auth();
-    if (!session?.user?.email) {
-      return Response.json({ error: 'Unauthorized' }, { status: 401 });
-    }
     const { sql } = await request.json();
 
     if (!sql || typeof sql !== 'string') {

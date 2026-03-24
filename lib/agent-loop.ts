@@ -1,5 +1,4 @@
 import { AgentEvent, QueryResult, TableMetadata, ConversationTurn, Attachment } from './types';
-import type { UserConfig } from './user-config';
 import {
   generateSQL,
   analyzeResults,
@@ -10,7 +9,6 @@ import {
   buildTableContext,
   checkDateCompleteness,
   parseChartConfigFromAnalysis,
-  LLMOverrides,
 } from './anthropic';
 import { findRelevantTables, ensureMetadataLoading, waitForRefresh, waitForPrioritySchemas, getMetadataCache, triggerBackgroundRefresh } from './metadata';
 import { matchQueries, loadQueryLibrary, getQueryLibrary } from './query-matcher';
@@ -146,13 +144,7 @@ function getUnusedTables(
  * Run the agentic query loop.
  * Returns an NDJSON ReadableStream of AgentEvent objects.
  */
-export function runAgentLoop(question: string, history?: ConversationTurn[], attachments?: Attachment[], userConfig?: Required<UserConfig>): ReadableStream {
-  // Build LLM overrides from per-user config
-  const llmOverrides: LLMOverrides | undefined =
-    userConfig?.anthropicApiKey || userConfig?.anthropicModel
-      ? { apiKey: userConfig.anthropicApiKey || undefined, model: userConfig.anthropicModel || undefined }
-      : undefined;
-
+export function runAgentLoop(question: string, history?: ConversationTurn[], attachments?: Attachment[]): ReadableStream {
   return new ReadableStream({
     async start(controller) {
       try {
@@ -264,7 +256,7 @@ export function runAgentLoop(question: string, history?: ConversationTurn[], att
           try {
             let stream: ReadableStream;
             if (iteration === 1) {
-              stream = await generateSQL(question, relevantTables, relevantQueries, history, relevantMetrics, relevantGitHubQueries, attachments, llmOverrides);
+              stream = await generateSQL(question, relevantTables, relevantQueries, history, relevantMetrics, relevantGitHubQueries, attachments);
             } else {
               // Build context about what was already tried
               const unusedTables = getUnusedTables(relevantTables, usedTableNames);
@@ -280,7 +272,6 @@ export function runAgentLoop(question: string, history?: ConversationTurn[], att
                 relevantMetrics,
                 relevantGitHubQueries,
                 attachments,
-                llmOverrides,
               );
             }
             // Stream the SQL generation to the client token-by-token
@@ -347,7 +338,7 @@ export function runAgentLoop(question: string, history?: ConversationTurn[], att
               type: 'progress',
               content: 'Reviewing query for logical errors...',
             });
-            const review = await reviewSQL(question, currentSQL, relevantTables, llmOverrides);
+            const review = await reviewSQL(question, currentSQL, relevantTables);
             if (!review.approved && review.correctedSQL) {
               const issuesSummary = review.issues.join('; ');
               emit(controller, {
@@ -395,7 +386,7 @@ export function runAgentLoop(question: string, history?: ConversationTurn[], att
               });
 
               try {
-                const fixStream = await fixSQL(errorMsg, currentSQL, question, relevantTables, llmOverrides);
+                const fixStream = await fixSQL(errorMsg, currentSQL, question, relevantTables);
                 const fixResponse = await collectStream(fixStream);
                 const fixedSQL = extractSQL(fixResponse);
                 if (fixedSQL) {
@@ -508,7 +499,6 @@ export function runAgentLoop(question: string, history?: ConversationTurn[], att
                 relevantMetrics,
                 relevantGitHubQueries,
                 attachments,
-                llmOverrides,
               );
               const revisedResponse = await streamSQLGeneration(controller, revisedStream, iteration + 1);
               const revisedSQL = extractSQL(revisedResponse);
@@ -567,7 +557,7 @@ export function runAgentLoop(question: string, history?: ConversationTurn[], att
             }
 
             try {
-              const validation = await validateResults(question, sql, results, relevantTables, llmOverrides);
+              const validation = await validateResults(question, sql, results, relevantTables);
 
               if (!validation.valid) {
                 emit(controller, {
@@ -603,7 +593,6 @@ export function runAgentLoop(question: string, history?: ConversationTurn[], att
                     relevantMetrics,
                     relevantGitHubQueries,
                     attachments,
-                    llmOverrides,
                   );
                   const revisedResponse = await streamSQLGeneration(controller, revisedStream, iteration + 1);
                   const revisedSQL = extractSQL(revisedResponse);
@@ -644,7 +633,7 @@ export function runAgentLoop(question: string, history?: ConversationTurn[], att
                         // Validate the revised results
                         if (revisedResults.rowCount > 0) {
                           const reValidation = await validateResults(
-                            question, revisedSQL, revisedResults, relevantTables, llmOverrides
+                            question, revisedSQL, revisedResults, relevantTables
                           );
                           emit(controller, {
                             type: 'validation',
@@ -704,8 +693,7 @@ export function runAgentLoop(question: string, history?: ConversationTurn[], att
               question,
               currentSQL,
               currentResults,
-              history,
-              llmOverrides,
+              history
             );
             const reader = analysisStream.getReader();
             const decoder = new TextDecoder();

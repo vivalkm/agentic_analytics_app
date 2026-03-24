@@ -1,4 +1,3 @@
-import { auth } from '@/auth';
 import {
   getMetadataCache,
   getAllTables,
@@ -10,10 +9,6 @@ import {
 } from '@/lib/metadata';
 
 export async function GET() {
-  const session = await auth();
-  if (!session?.user?.email) {
-    return Response.json({ error: 'Unauthorized' }, { status: 401 });
-  }
   const cache = getMetadataCache();
 
   return Response.json({
@@ -35,10 +30,6 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    const postSession = await auth();
-    if (!postSession?.user?.email) {
-      return Response.json({ error: 'Unauthorized' }, { status: 401 });
-    }
     const body = await request.json().catch(() => ({}));
     const blocking = body?.blocking === true;
     const priorityOnly = body?.priorityOnly === true;
