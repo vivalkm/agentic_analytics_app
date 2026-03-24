@@ -2,6 +2,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { TableMetadata, QueryResult, QueryLibraryEntry, MetricEntry, ValidationResult, ConversationTurn, Attachment } from './types';
+import { getEnv } from './env-config';
 
 /** Load domain context file (cached after first read). */
 let _domainContext: string | null = null;
@@ -20,11 +21,11 @@ function getDomainContext(): string {
 
 const getClient = () =>
   new Anthropic({
-    apiKey: process.env.ANTHROPIC_API_KEY,
-    baseURL: process.env.ANTHROPIC_BASE_URL || undefined,
+    apiKey: getEnv('ANTHROPIC_API_KEY'),
+    baseURL: getEnv('ANTHROPIC_BASE_URL') || undefined,
   });
 
-const getModel = () => process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-20250514';
+const getModel = () => getEnv('ANTHROPIC_MODEL') || 'claude-sonnet-4-20250514';
 
 const SQL_SYSTEM_PROMPT = `You are a SQL analyst for a Trino-based data lakehouse. You write precise, efficient Trino SQL.
 Today's date is ${new Date().toISOString().slice(0, 10)}. When the user refers to relative time periods ("this month", "this quarter", "last year", "in March") without specifying a year, always assume the CURRENT year (${new Date().getFullYear()}) or use CURRENT_DATE-based expressions. Never default to a past year.

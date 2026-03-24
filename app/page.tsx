@@ -14,7 +14,9 @@ import { detectChartType } from '@/lib/chart-detector';
 import { SchemaExplorer } from '@/components/schema-explorer';
 import { QueryLibrary } from '@/components/query-library';
 import { MetricsCatalog } from '@/components/metrics-catalog';
-import { Database, Trash2, Loader2, Sparkles, Play, Search, CheckCircle2, PanelLeft, PanelLeftClose, Menu, ArrowDown, Sun, Moon, Keyboard, MessageCircleQuestion, RefreshCw, DatabaseZap, Heart } from 'lucide-react';
+import { SettingsDialog } from '@/components/settings-dialog';
+import { ApiKeyPrompt } from '@/components/api-key-prompt';
+import { Database, Trash2, Loader2, Sparkles, Play, Search, CheckCircle2, PanelLeft, PanelLeftClose, Menu, ArrowDown, Sun, Moon, Keyboard, MessageCircleQuestion, RefreshCw, DatabaseZap, Heart, Settings } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet';
@@ -76,6 +78,9 @@ export default function Home() {
   const [statusText, setStatusText] = useState('');
   const [schemaVersion, setSchemaVersion] = useState(0);
   const [mounted, setMounted] = useState(false);
+  const [needsApiKey, setNeedsApiKey] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [apiKeyChecked, setApiKeyChecked] = useState(false);
   const { theme, setTheme } = useTheme();
   const scrollRef = useRef<HTMLDivElement>(null);
   const initialized = useRef(false);
@@ -112,6 +117,18 @@ export default function Home() {
 
   // Avoid hydration mismatch for theme
   useEffect(() => setMounted(true), []);
+
+  // Check if API key is configured on mount
+  useEffect(() => {
+    fetch('/api/settings')
+      .then((res) => res.json())
+      .then((data) => {
+        const apiKeySetting = data.settings?.find((s: { key: string }) => s.key === 'ANTHROPIC_API_KEY');
+        setNeedsApiKey(!apiKeySetting?.hasValue);
+        setApiKeyChecked(true);
+      })
+      .catch(() => setApiKeyChecked(true));
+  }, []);
 
   // Load session on mount
   useEffect(() => {
@@ -719,6 +736,7 @@ export default function Home() {
   );
 
   return (
+    <>
     <TooltipProvider delay={300}>
     <div className="flex h-screen">
       {/* Desktop sidebar */}
@@ -819,6 +837,17 @@ export default function Home() {
                 </div>
               </DialogContent>
             </Dialog>
+
+            {/* Settings */}
+            <Tooltip>
+              <TooltipTrigger
+                render={<Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground" />}
+                onClick={() => setSettingsOpen(true)}
+              >
+                <Settings className="h-4 w-4" />
+              </TooltipTrigger>
+              <TooltipContent>Settings</TooltipContent>
+            </Tooltip>
 
             {/* Theme toggle */}
             <Tooltip>
@@ -1108,5 +1137,12 @@ export default function Home() {
       </div>
     </div>
     </TooltipProvider>
+
+    <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
+
+    {apiKeyChecked && needsApiKey && (
+      <ApiKeyPrompt onComplete={() => setNeedsApiKey(false)} />
+    )}
+    </>
   );
 }
