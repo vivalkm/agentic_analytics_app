@@ -103,7 +103,7 @@ export function MetricsCatalog({ onInsertMetric }: MetricsCatalogProps) {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <span className="text-xs font-medium text-sidebar-foreground">Metrics</span>
+          <span className="text-sm font-medium text-sidebar-foreground">Metrics</span>
           <Badge variant="secondary" className="text-xs px-1.5 py-0">
             {metrics.length}
           </Badge>
@@ -209,17 +209,17 @@ function MetricCard({
         title={`Ask about ${metric.name}`}
       >
         <div className="flex items-center gap-1.5">
-          <p className="text-xs font-medium leading-snug text-sidebar-foreground hover:text-primary transition-colors truncate">
+          <p className="text-sm font-medium leading-snug text-sidebar-foreground hover:text-primary transition-colors truncate">
             {metric.name}
           </p>
-          <span className={`shrink-0 rounded px-1 py-0 text-[10px] leading-tight ${metric.kind === 'derived' ? 'bg-purple-500/15 text-purple-400' : 'bg-zinc-500/15 text-zinc-400'}`}>
+          <span className={`shrink-0 rounded px-1 py-0 text-[11px] leading-tight ${metric.kind === 'derived' ? 'bg-purple-500/15 text-purple-400' : 'bg-zinc-500/15 text-zinc-400'}`}>
             {metric.kind === 'derived' ? 'metric' : 'source'}
           </span>
         </div>
       </button>
 
       {metric.description && (
-        <p className="text-xs text-muted-foreground leading-snug line-clamp-2">
+        <p className="text-sm text-muted-foreground leading-snug line-clamp-2">
           {metric.description}
         </p>
       )}
@@ -256,9 +256,9 @@ function MetricCard({
 
       {metric.sql && (
         <Collapsible.Root>
-          <Collapsible.Trigger className="flex items-center gap-1 text-xs text-muted-foreground hover:text-sidebar-foreground group">
-            <ChevronRight className="h-2.5 w-2.5 transition-transform group-data-[open]:rotate-90" />
-            <Code2 className="h-2.5 w-2.5" />
+          <Collapsible.Trigger className="flex items-center gap-1 text-sm text-muted-foreground hover:text-sidebar-foreground group">
+            <ChevronRight className="h-3 w-3 transition-transform group-data-[open]:rotate-90" />
+            <Code2 className="h-3 w-3" />
             <span>Show SQL</span>
           </Collapsible.Trigger>
           <Collapsible.Panel>

@@ -1,8 +1,10 @@
 'use client';
 
+import { useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Sparkles, Loader2 } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Sparkles, Loader2, Play } from 'lucide-react';
 
 interface AnalysisCardProps {
   analysis: string;
@@ -11,11 +13,25 @@ interface AnalysisCardProps {
   onFollowUp?: (question: string) => void;
 }
 
-function parseFollowUps(text: string): string[] {
+/**
+ * Split analysis text into main body and follow-up questions.
+ * Detects headings like "Suggested Follow-Up Questions", "Follow-Up", etc.
+ */
+function splitFollowUps(text: string): { body: string; questions: string[] } {
+  // Match a follow-up heading (##, ###, or bold line)
+  const headingPattern = /\n(#{1,3}\s+.*(?:follow[\s\-]?up|next\s+question|suggested\s+question).*)\n/i;
+  const match = text.match(headingPattern);
+
+  if (!match || match.index === undefined) {
+    return { body: text, questions: [] };
+  }
+
+  const body = text.slice(0, match.index).trimEnd();
+  const followUpSection = text.slice(match.index);
+
+  // Extract questions from the follow-up section (lines containing ?)
   const questions: string[] = [];
-  const lines = text.split('\n');
-  for (const line of lines) {
-    // Strip list prefixes (1. / - / * ) and leading/trailing markdown bold/italic
+  for (const line of followUpSection.split('\n')) {
     const trimmed = line
       .replace(/^[\d\-\*\.\)]+\s*/, '')
       .trim()
@@ -23,14 +39,14 @@ function parseFollowUps(text: string): string[] {
       .replace(/\*{1,2}$/, '')
       .trim();
     if (trimmed.includes('?') && trimmed.length > 15) {
-      // Extract up to the question mark (handles trailing bold, punctuation, etc.)
       const qMatch = trimmed.match(/^(.+?\?)/);
       if (qMatch) {
         questions.push(qMatch[1].trim());
       }
     }
   }
-  return questions.slice(-5); // Last few questions are usually the follow-ups
+
+  return { body, questions: questions.slice(0, 5) };
 }
 
 /**
@@ -156,7 +172,10 @@ export function AnalysisCard({
   iterations,
   onFollowUp,
 }: AnalysisCardProps) {
-  const followUps = streaming ? [] : parseFollowUps(analysis);
+  const { body, questions } = useMemo(
+    () => (streaming ? { body: analysis, questions: [] } : splitFollowUps(analysis)),
+    [analysis, streaming]
+  );
 
   return (
     <Card className="border-border bg-card shadow-sm">
@@ -177,21 +196,28 @@ export function AnalysisCard({
       <CardContent>
         <div
           className="prose prose-sm prose-invert max-w-none text-base leading-relaxed text-foreground"
-          dangerouslySetInnerHTML={{ __html: renderMarkdown(analysis) }}
+          dangerouslySetInnerHTML={{ __html: renderMarkdown(body) }}
         />
 
-        {followUps.length > 0 && onFollowUp && (
-          <div className="mt-4 flex flex-wrap gap-2 border-t border-border pt-3">
-            <span className="text-base text-muted-foreground">Follow-up:</span>
-            {followUps.map((q, i) => (
-              <Badge
-                key={i}
-                variant="secondary"
-                className="cursor-pointer text-base hover:bg-accent"
-                onClick={() => onFollowUp(q)}
-              >
-                {q.length > 60 ? q.slice(0, 57) + '...' : q}
-              </Badge>
+        {questions.length > 0 && onFollowUp && (
+          <div className="mt-4 border-t border-border pt-4">
+            <p className="text-sm font-medium text-muted-foreground mb-3">Suggested Follow-Up Questions</p>
+            {questions.map((q, i) => (
+              <div key={i} className={`flex items-start gap-2.5 py-2.5 ${i > 0 ? 'border-t border-border/40' : ''}`}>
+                <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-muted-foreground/50" />
+                <p className="flex-1 text-base text-foreground/85 leading-snug pt-0.5">
+                  {q}
+                </p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="shrink-0 gap-1.5 text-xs"
+                  onClick={() => onFollowUp(q)}
+                >
+                  <Play className="h-3 w-3" />
+                  Ask
+                </Button>
+              </div>
             ))}
           </div>
         )}

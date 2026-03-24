@@ -128,6 +128,27 @@ export function ChartRenderer({ config, results }: ChartRendererProps) {
     );
   }, [chartData, isGrouped, groupValues, config.yKeys]);
 
+  // Detect if two non-grouped y-series need dual axes (scale differs by 5x+)
+  const dualAxis = useMemo(() => {
+    if (isGrouped || config.yKeys.length !== 2 || chartData.length === 0) return null;
+    const [keyA, keyB] = config.yKeys;
+
+    const maxA = Math.max(...chartData.map((r) => Math.abs(Number(r[keyA]) || 0)));
+    const maxB = Math.max(...chartData.map((r) => Math.abs(Number(r[keyB]) || 0)));
+    if (maxA === 0 || maxB === 0) return null;
+
+    const ratio = maxA / maxB;
+    if (ratio >= 5) {
+      // A is the bigger series (left), B is smaller (right)
+      return { left: keyA, right: keyB };
+    }
+    if (ratio <= 0.2) {
+      // B is the bigger series (left), A is smaller (right)
+      return { left: keyB, right: keyA };
+    }
+    return null;
+  }, [isGrouped, config.yKeys, chartData]);
+
   if (config.type === 'none' || chartData.length === 0 || !hasData) return null;
 
   const commonTooltipStyle = {
@@ -152,7 +173,7 @@ export function ChartRenderer({ config, results }: ChartRendererProps) {
       )}
       <ResponsiveContainer width="100%" height={300}>
         {config.type === 'bar' ? (
-          <BarChart data={chartData} margin={{ top: 5, right: 10, left: 10, bottom: 5 }}>
+          <BarChart data={chartData} margin={{ top: 5, right: dualAxis ? 10 : 10, left: 10, bottom: 5 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="hsl(240, 6%, 20%)" />
             <XAxis
               dataKey={config.xKey}
@@ -161,13 +182,35 @@ export function ChartRenderer({ config, results }: ChartRendererProps) {
               axisLine={{ stroke: 'hsl(240, 6%, 20%)' }}
               tickLine={false}
             />
-            <YAxis
-              tickFormatter={formatValue}
-              tick={{ fontSize: 11, fill: 'hsl(0, 0%, 55%)' }}
-              axisLine={false}
-              tickLine={false}
-              width={60}
-            />
+            {dualAxis && !isGrouped ? (
+              <>
+                <YAxis
+                  yAxisId="left"
+                  tickFormatter={formatValue}
+                  tick={{ fontSize: 11, fill: COLORS[config.yKeys.indexOf(dualAxis.left) % COLORS.length] }}
+                  axisLine={false}
+                  tickLine={false}
+                  width={60}
+                />
+                <YAxis
+                  yAxisId="right"
+                  orientation="right"
+                  tickFormatter={formatValue}
+                  tick={{ fontSize: 11, fill: COLORS[config.yKeys.indexOf(dualAxis.right) % COLORS.length] }}
+                  axisLine={false}
+                  tickLine={false}
+                  width={60}
+                />
+              </>
+            ) : (
+              <YAxis
+                tickFormatter={formatValue}
+                tick={{ fontSize: 11, fill: 'hsl(0, 0%, 55%)' }}
+                axisLine={false}
+                tickLine={false}
+                width={60}
+              />
+            )}
             <Tooltip
               formatter={(value) => formatValue(value)}
               labelFormatter={(label) => String(label)}
@@ -196,11 +239,12 @@ export function ChartRenderer({ config, results }: ChartRendererProps) {
                     fill={COLORS[i % COLORS.length]}
                     radius={[3, 3, 0, 0]}
                     maxBarSize={50}
+                    {...(dualAxis ? { yAxisId: key === dualAxis.right ? 'right' : 'left' } : {})}
                   />
                 ))}
           </BarChart>
         ) : config.type === 'line' ? (
-          <LineChart data={chartData} margin={{ top: 5, right: 10, left: 10, bottom: 5 }}>
+          <LineChart data={chartData} margin={{ top: 5, right: dualAxis ? 10 : 10, left: 10, bottom: 5 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="hsl(240, 6%, 20%)" />
             <XAxis
               dataKey={config.xKey}
@@ -209,13 +253,35 @@ export function ChartRenderer({ config, results }: ChartRendererProps) {
               axisLine={{ stroke: 'hsl(240, 6%, 20%)' }}
               tickLine={false}
             />
-            <YAxis
-              tickFormatter={formatValue}
-              tick={{ fontSize: 11, fill: 'hsl(0, 0%, 55%)' }}
-              axisLine={false}
-              tickLine={false}
-              width={60}
-            />
+            {dualAxis ? (
+              <>
+                <YAxis
+                  yAxisId="left"
+                  tickFormatter={formatValue}
+                  tick={{ fontSize: 11, fill: COLORS[config.yKeys.indexOf(dualAxis.left) % COLORS.length] }}
+                  axisLine={false}
+                  tickLine={false}
+                  width={60}
+                />
+                <YAxis
+                  yAxisId="right"
+                  orientation="right"
+                  tickFormatter={formatValue}
+                  tick={{ fontSize: 11, fill: COLORS[config.yKeys.indexOf(dualAxis.right) % COLORS.length] }}
+                  axisLine={false}
+                  tickLine={false}
+                  width={60}
+                />
+              </>
+            ) : (
+              <YAxis
+                tickFormatter={formatValue}
+                tick={{ fontSize: 11, fill: 'hsl(0, 0%, 55%)' }}
+                axisLine={false}
+                tickLine={false}
+                width={60}
+              />
+            )}
             <Tooltip
               formatter={(value) => formatValue(value)}
               labelFormatter={(label) => String(label)}
@@ -235,6 +301,7 @@ export function ChartRenderer({ config, results }: ChartRendererProps) {
                 strokeWidth={2}
                 dot={chartData.length <= 30}
                 activeDot={{ r: 4 }}
+                {...(dualAxis ? { yAxisId: key === dualAxis.right ? 'right' : 'left' } : {})}
               />
             ))}
           </LineChart>

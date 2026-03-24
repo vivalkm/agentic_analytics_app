@@ -251,9 +251,9 @@ function CatalogNode({
 
   return (
     <Collapsible.Root defaultOpen={defaultOpen} {...controlled}>
-      <Collapsible.Trigger className="flex w-full items-center gap-1.5 rounded px-1.5 py-1 text-xs font-medium hover:bg-sidebar-accent group">
-        <ChevronRight className="h-3 w-3 text-muted-foreground transition-transform group-data-[open]:rotate-90" />
-        <Database className="h-3 w-3 text-muted-foreground" />
+      <Collapsible.Trigger className="flex w-full items-center gap-1.5 rounded px-1.5 py-1 text-sm font-medium hover:bg-sidebar-accent group">
+        <ChevronRight className="h-3.5 w-3.5 text-muted-foreground transition-transform group-data-[open]:rotate-90" />
+        <Database className="h-3.5 w-3.5 text-muted-foreground" />
         <span className="truncate">{catalog}</span>
       </Collapsible.Trigger>
       <Collapsible.Panel className="pl-3">
@@ -295,10 +295,10 @@ function SchemaNode({
 
   return (
     <Collapsible.Root {...controlled}>
-      <Collapsible.Trigger className="flex w-full items-center gap-1.5 rounded px-1.5 py-1 text-xs hover:bg-sidebar-accent group">
-        <ChevronRight className="h-3 w-3 text-muted-foreground transition-transform group-data-[open]:rotate-90" />
-        <Folder className="h-3 w-3 text-muted-foreground group-data-[open]:hidden" />
-        <FolderOpen className="h-3 w-3 text-muted-foreground hidden group-data-[open]:block" />
+      <Collapsible.Trigger className="flex w-full items-center gap-1.5 rounded px-1.5 py-1 text-sm hover:bg-sidebar-accent group">
+        <ChevronRight className="h-3.5 w-3.5 text-muted-foreground transition-transform group-data-[open]:rotate-90" />
+        <Folder className="h-3.5 w-3.5 text-muted-foreground group-data-[open]:hidden" />
+        <FolderOpen className="h-3.5 w-3.5 text-muted-foreground hidden group-data-[open]:block" />
         <span className="truncate">{schema}</span>
         <Badge variant="secondary" className="ml-auto text-xs px-1 py-0">
           {tables.length}
@@ -349,23 +349,23 @@ function TableNode({
         </Collapsible.Trigger>
         <button
           onClick={() => onTableClick(fqn)}
-          className="flex flex-1 items-center gap-1.5 rounded px-1 py-0.5 text-xs hover:bg-sidebar-accent truncate"
+          className="flex flex-1 items-center gap-1.5 rounded px-1 py-0.5 text-sm hover:bg-sidebar-accent truncate"
           title={fqn}
         >
-          <Table2 className="h-3 w-3 shrink-0 text-muted-foreground" />
+          <Table2 className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
           <span className="truncate">{table}</span>
-          {isCopied && <Check className="h-3 w-3 shrink-0 text-green-400" />}
+          {isCopied && <Check className="h-3.5 w-3.5 shrink-0 text-green-400" />}
         </button>
       </div>
       <Collapsible.Panel className="pl-6">
         {columns.map((col) => (
           <div
             key={col.name}
-            className="flex items-center justify-between gap-2 px-1.5 py-0.5 text-xs"
+            className="flex items-center justify-between gap-2 px-1.5 py-0.5 text-sm"
             title={col.comment || undefined}
           >
             <span className="truncate text-sidebar-foreground/80">
-              <Columns3 className="mr-1 inline h-2.5 w-2.5 text-muted-foreground" />
+              <Columns3 className="mr-1 inline h-3 w-3 text-muted-foreground" />
               {col.name}
             </span>
             <span className="shrink-0 font-mono text-xs text-muted-foreground">
