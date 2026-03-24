@@ -29,6 +29,11 @@ const getModel = () => process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-20250514'
 const SQL_SYSTEM_PROMPT = `You are a SQL analyst for a Trino-based data lakehouse. You write precise, efficient Trino SQL.
 Today's date is ${new Date().toISOString().slice(0, 10)}. When the user refers to relative time periods ("this month", "this quarter", "last year", "in March") without specifying a year, always assume the CURRENT year (${new Date().getFullYear()}) or use CURRENT_DATE-based expressions. Never default to a past year.
 
+REFERENCE PRIORITY (use in this order):
+1. **Metric catalog** (Statsig): If a matched metric definition is provided below, use its definition (aggregation, column, filters) and backing SQL as the primary reference. The metric catalog is the authoritative source for how business metrics are calculated.
+2. **Query library**: If a matched reference query is provided below, adapt it for the user's question. These are vetted, production-quality queries.
+3. **Schema metadata**: If no metric or library query matches, write SQL from scratch using the available table schemas below.
+
 Rules:
 - ONLY generate SELECT or WITH (CTE) statements. NEVER generate INSERT, UPDATE, DELETE, DROP, ALTER, CREATE, TRUNCATE, MERGE, or any other data-modification SQL. If the user asks you to modify data, politely decline and explain this is a read-only analytics tool.
 - Do NOT generate SHOW SCHEMAS, SHOW TABLES, DESCRIBE, or EXPLAIN statements. All table metadata (schemas, tables, columns, types) is already provided to you below. Use that metadata directly — never try to discover schema at runtime.
@@ -152,19 +157,23 @@ function buildMetricContext(metrics: MetricEntry[]): string {
   const derivedMetrics = metrics.filter((m) => m.kind === 'derived');
   const sourceMetrics = metrics.filter((m) => m.kind === 'source');
 
-  let context = '\n\nRelevant metric definitions (from Statsig metric catalog — use these as reference for how metrics are calculated):\n';
+  let context = '\n\nMetric definitions from Statsig catalog (priority 1 — use these as the authoritative reference for how metrics are calculated):\n';
 
   if (derivedMetrics.length > 0) {
     context += derivedMetrics
       .map((m) => {
         let detail = `### ${m.name}\n${m.description}`;
-        if (m.aggregation) detail += `\nAggregation: ${m.aggregation}`;
-        if (m.valueColumn) detail += `\nValue column: ${m.valueColumn}`;
-        if (m.sourceName) detail += `\nMetric source: ${m.sourceName}`;
+        // Show a concise formula: e.g. SUM(revenue_usd) FROM source WHERE status = 'completed'
+        const agg = (m.aggregation || 'count').toUpperCase();
+        const col = m.valueColumn || '*';
+        let formula = `${agg}(${col})`;
+        if (m.sourceName) formula += ` FROM ${m.sourceName}`;
         if (m.criteria && m.criteria.length > 0) {
-          detail += `\nFilters: ${m.criteria.map((c) => `${c.column} ${c.condition} ${c.values.join(', ')}`).join('; ')}`;
+          formula += ` WHERE ${m.criteria.map((c) => `${c.column} ${c.condition} ${c.values.join(', ')}`).join(' AND ')}`;
         }
-        if (m.sql) detail += `\nBacking SQL:\n\`\`\`sql\n${m.sql}\n\`\`\``;
+        detail += `\nDefinition: ${formula}`;
+        if (m.sourceName) detail += `\nMetric source: ${m.sourceName}`;
+        if (m.sql) detail += `\nBacking source SQL:\n\`\`\`sql\n${m.sql}\n\`\`\``;
         return detail;
       })
       .join('\n\n');
@@ -202,28 +211,38 @@ export async function generateSQL(
   relevantTables: TableMetadata[],
   relevantQueries: QueryLibraryEntry[],
   history?: ConversationTurn[],
-  relevantMetrics?: MetricEntry[]
+  relevantMetrics?: MetricEntry[],
+  relevantGitHubQueries?: QueryLibraryEntry[]
 ): Promise<ReadableStream> {
-  const tableContext = buildTableContext(relevantTables);
+  const metricContext = buildMetricContext(relevantMetrics ?? []);
 
   const queryContext =
     relevantQueries.length > 0
-      ? '\n\nReference queries that may be relevant:\n' +
+      ? '\n\nReference queries from local query library (priority 2):\n' +
         relevantQueries
           .map((q) => `-- ${q.description}\n${q.sql}`)
           .join('\n\n')
       : '';
 
-  const metricContext = buildMetricContext(relevantMetrics ?? []);
+  const githubQueryContext =
+    (relevantGitHubQueries ?? []).length > 0
+      ? '\n\nReference queries from shared repo (priority 3):\n' +
+        (relevantGitHubQueries ?? [])
+          .map((q) => `-- ${q.description}\n${q.sql}`)
+          .join('\n\n')
+      : '';
+
+  const tableContext = buildTableContext(relevantTables);
 
   const domain = getDomainContext();
   const systemPrompt =
     SQL_SYSTEM_PROMPT +
     (domain ? `\n\n${domain}` : '') +
-    '\n\nAvailable tables and their schemas:\n' +
-    tableContext +
+    metricContext +
     queryContext +
-    metricContext;
+    githubQueryContext +
+    '\n\nAvailable tables and their schemas:\n' +
+    tableContext;
 
   const messages: Anthropic.MessageParam[] = [
     ...buildHistoryMessages(history),
@@ -428,18 +447,28 @@ export async function generateRevisedSQL(
   relevantTables: TableMetadata[],
   relevantQueries: QueryLibraryEntry[],
   unusedTables?: TableMetadata[],
-  relevantMetrics?: MetricEntry[]
+  relevantMetrics?: MetricEntry[],
+  relevantGitHubQueries?: QueryLibraryEntry[]
 ): Promise<ReadableStream> {
-  const tableContext = buildTableContext(relevantTables);
+  const metricContext = buildMetricContext(relevantMetrics ?? []);
+
   const queryContext =
     relevantQueries.length > 0
-      ? '\n\nReference queries that may be relevant:\n' +
+      ? '\n\nReference queries from local query library (priority 2):\n' +
         relevantQueries
           .map((q) => `-- ${q.description}\n${q.sql}`)
           .join('\n\n')
       : '';
 
-  const metricContext = buildMetricContext(relevantMetrics ?? []);
+  const githubQueryContext =
+    (relevantGitHubQueries ?? []).length > 0
+      ? '\n\nReference queries from shared repo (priority 3):\n' +
+        (relevantGitHubQueries ?? [])
+          .map((q) => `-- ${q.description}\n${q.sql}`)
+          .join('\n\n')
+      : '';
+
+  const tableContext = buildTableContext(relevantTables);
 
   const unusedTableContext =
     unusedTables && unusedTables.length > 0
@@ -451,10 +480,11 @@ export async function generateRevisedSQL(
   const systemPrompt =
     SQL_SYSTEM_PROMPT +
     (domain ? `\n\n${domain}` : '') +
+    metricContext +
+    queryContext +
+    githubQueryContext +
     '\n\nAvailable tables and their schemas:\n' +
     tableContext +
-    queryContext +
-    metricContext +
     unusedTableContext;
 
   const fixMessage = [

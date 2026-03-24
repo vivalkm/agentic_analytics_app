@@ -173,14 +173,10 @@ export function SchemaExplorer({ onInsertTable, refreshKey }: SchemaExplorerProp
       {/* Stats + refresh */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
+          <span className="text-sm font-medium text-sidebar-foreground">Schema</span>
           <Badge variant="secondary" className="text-xs px-1.5 py-0">
             {data?.tableCount ?? 0} tables
           </Badge>
-          {data?.lastRefreshed && (
-            <span className="text-xs text-muted-foreground">
-              {timeAgo(data.lastRefreshed)}
-            </span>
-          )}
         </div>
         <Button
           variant="ghost"
@@ -188,10 +184,18 @@ export function SchemaExplorer({ onInsertTable, refreshKey }: SchemaExplorerProp
           className="h-6 w-6"
           onClick={handleRefresh}
           disabled={refreshing}
+          title="Refresh schema"
         >
           <RefreshCw className={`h-3 w-3 ${refreshing ? 'animate-spin' : ''}`} />
         </Button>
       </div>
+
+      {/* Last refreshed */}
+      {data?.lastRefreshed && (
+        <p className="text-xs text-muted-foreground/70">
+          Synced with Trino at {new Date(data.lastRefreshed).toLocaleDateString()} {new Date(data.lastRefreshed).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+        </p>
+      )}
 
       {/* Search */}
       <div className="relative">

@@ -33,7 +33,8 @@ async function statsigFetch(path: string): Promise<unknown> {
 // --- Metric Sources (base tables/queries) ---
 
 interface MetricSource {
-  id: string;
+  id?: string;
+  sourceID?: string;
   name: string;
   description?: string;
   sql?: string;
@@ -41,6 +42,7 @@ interface MetricSource {
   tags?: string[];
   owner?: { ownerName?: string; ownerEmail?: string };
   team?: string;
+  [key: string]: unknown; // capture any extra fields
 }
 
 interface MetricSourceListResponse {
@@ -194,16 +196,17 @@ export async function fetchAllMetrics(): Promise<MetricEntry[]> {
     const batch = sources.slice(i, i + CONCURRENCY);
     const results = await Promise.allSettled(
       batch.map(async (source) => {
+        const sourceId = source.id || source.sourceID || '';
         let sql = source.sql || '';
-        if (!sql && source.id) {
+        if (!sql && sourceId) {
           try {
-            sql = await fetchMetricSQL(source.id);
+            sql = await fetchMetricSQL(sourceId);
           } catch {
             // If individual metric SQL fetch fails, use source SQL or empty
           }
         }
         return {
-          id: source.id,
+          id: sourceId,
           name: source.name,
           description: source.description || '',
           sql,

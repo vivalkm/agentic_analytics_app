@@ -686,7 +686,7 @@ export default function Home() {
       </TabsContent>
       <TabsContent value="metrics" className="flex-1 overflow-hidden">
         <ScrollArea className="h-full">
-          <MetricsCatalog onInsertMetric={handleUseQuery} />
+          <MetricsCatalog />
         </ScrollArea>
       </TabsContent>
     </Tabs>

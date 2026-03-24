@@ -13,6 +13,7 @@ import {
 import { findRelevantTables, ensureMetadataLoading, waitForRefresh, waitForPrioritySchemas, getMetadataCache, triggerBackgroundRefresh } from './metadata';
 import { matchQueries, loadQueryLibrary, getQueryLibrary } from './query-matcher';
 import { matchMetrics, ensureMetricsLoading } from './metric-catalog';
+import { matchGitHubQueries, ensureGitHubQueriesLoading } from './github-queries';
 import { validateSQL } from './sql-validator';
 import { executeTrinoMCP } from './trino-mcp';
 
@@ -151,6 +152,7 @@ export function runAgentLoop(question: string, history?: ConversationTurn[]): Re
         if (getQueryLibrary().length === 0) loadQueryLibrary();
         ensureMetadataLoading();
         ensureMetricsLoading();
+        ensureGitHubQueriesLoading();
 
         // Block until priority schemas are loaded (first load) so the LLM
         // never generates SQL without knowing the actual schema
@@ -167,7 +169,27 @@ export function runAgentLoop(question: string, history?: ConversationTurn[]): Re
 
         let relevantTables = findRelevantTables(question);
         const relevantQueries = matchQueries(question);
+        const relevantGitHubQueries = matchGitHubQueries(question);
         const relevantMetrics = matchMetrics(question);
+
+        // Log what references were found (priority order)
+        const refSources: string[] = [];
+        if (relevantMetrics.length > 0) {
+          refSources.push(`${relevantMetrics.length} metric definition${relevantMetrics.length > 1 ? 's' : ''} (${relevantMetrics.map((m) => m.name).join(', ')})`);
+        }
+        if (relevantQueries.length > 0) {
+          refSources.push(`${relevantQueries.length} local query reference${relevantQueries.length > 1 ? 's' : ''}`);
+        }
+        if (relevantGitHubQueries.length > 0) {
+          refSources.push(`${relevantGitHubQueries.length} shared repo query reference${relevantGitHubQueries.length > 1 ? 's' : ''}`);
+        }
+        if (refSources.length > 0) {
+          emit(controller, {
+            type: 'thinking',
+            iteration: 1,
+            content: `Found ${refSources.join(', ')}.`,
+          });
+        }
 
         // If no relevant tables found, check if we have ANY metadata loaded
         if (relevantTables.length === 0) {
@@ -190,12 +212,14 @@ export function runAgentLoop(question: string, history?: ConversationTurn[]): Re
 
           // After refresh: still no relevant tables?
           if (relevantTables.length === 0) {
-            if (relevantQueries.length > 0) {
-              // Query library has references — proceed with those
+            if (relevantMetrics.length > 0 || relevantQueries.length > 0 || relevantGitHubQueries.length > 0) {
+              // Metric catalog, query library, or GitHub repo has references — proceed
               emit(controller, {
                 type: 'thinking',
                 iteration: 1,
-                content: 'No exact table matches found, but using query library references.',
+                content: relevantMetrics.length > 0
+                  ? 'No exact table matches, but using metric catalog definitions.'
+                  : 'No exact table matches, but using query library references.',
               });
             } else {
               // Nothing available — ask user to refresh metadata
@@ -232,7 +256,7 @@ export function runAgentLoop(question: string, history?: ConversationTurn[]): Re
           try {
             let stream: ReadableStream;
             if (iteration === 1) {
-              stream = await generateSQL(question, relevantTables, relevantQueries, history, relevantMetrics);
+              stream = await generateSQL(question, relevantTables, relevantQueries, history, relevantMetrics, relevantGitHubQueries);
             } else {
               // Build context about what was already tried
               const unusedTables = getUnusedTables(relevantTables, usedTableNames);
@@ -245,7 +269,8 @@ export function runAgentLoop(question: string, history?: ConversationTurn[]): Re
                 relevantTables,
                 relevantQueries,
                 unusedTables,
-                relevantMetrics
+                relevantMetrics,
+                relevantGitHubQueries
               );
             }
             // Stream the SQL generation to the client token-by-token
@@ -470,7 +495,8 @@ export function runAgentLoop(question: string, history?: ConversationTurn[]): Re
                 relevantTables,
                 relevantQueries,
                 unusedTables,
-                relevantMetrics
+                relevantMetrics,
+                relevantGitHubQueries
               );
               const revisedResponse = await streamSQLGeneration(controller, revisedStream, iteration + 1);
               const revisedSQL = extractSQL(revisedResponse);
@@ -561,7 +587,9 @@ export function runAgentLoop(question: string, history?: ConversationTurn[]): Re
                     validation.suggestion,
                     relevantTables,
                     relevantQueries,
-                    unusedTables
+                    unusedTables,
+                    relevantMetrics,
+                    relevantGitHubQueries
                   );
                   const revisedResponse = await streamSQLGeneration(controller, revisedStream, iteration + 1);
                   const revisedSQL = extractSQL(revisedResponse);
