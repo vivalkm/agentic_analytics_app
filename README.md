@@ -1,36 +1,112 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Lakehouse Analytics
+
+A analytics app for interactive data exploration. Ask questions in natural language, get SQL generated and executed against Trino, then receive AI-powered analysis with charts.
+
+## How It Works
+
+1. **Ask a question** — Type a natural language question about your data
+2. **SQL generation** — An LLM generates SQL using metric definitions, query library references, and schema metadata
+3. **Execution** — The query runs against Trino via an MCP subprocess
+4. **Analysis** — The LLM analyzes results and produces a markdown summary with charts
+5. **Iterate** — Ask follow-up questions or edit the SQL directly
+
+The agent loop retries up to 3 times, automatically fixing SQL errors and validating results.
+
+## Features
+
+- **Natural language to SQL** with streaming token output
+- **Multi-source context**: Statsig metric catalog, local query library, shared GitHub queries, schema metadata
+- **Automatic SQL validation**: Read-only enforcement, join fan-out detection, business logic review
+- **Interactive charts**: Bar, line, and pie charts auto-detected from results
+- **Sidebar tools**: Schema explorer, query library browser, metrics catalog with Statsig links
+- **Dark mode** with oklch color themes
+- **Session persistence** via localStorage
+- **CSV export** for query results
 
 ## Getting Started
 
-First, run the development server:
+### Prerequisites
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+- Node.js 18+
+- Access to a Trino cluster via [trino-mcp](https://github.com/Remitly/toolbox/tree/main/trino)
+- Anthropic API key (direct or via LLM gateway)
+
+### Setup
+
+1. Clone the repository and install dependencies:
+   ```bash
+   npm install
+   ```
+
+2. Create `.env.local` with your configuration:
+   ```env
+   # Required
+   ANTHROPIC_API_KEY=your-api-key
+   ANTHROPIC_BASE_URL=https://api.anthropic.com
+
+   # Trino configuration
+   TRINO_ENVIRONMENT=prod
+   TRINO_DEFAULT_CATALOG=lakehouse
+   TRINO_PRIORITY_SCHEMAS=fpa
+
+   # Optional: Statsig metric catalog
+   STATSIG_CONSOLE_API_KEY=your-statsig-key
+   STATSIG_METRIC_TEAMS=squad-FPA,squad-INTA
+
+   # Optional: Shared query library from GitHub
+   QUERY_LIBRARY_REPO=https://github.com/org/repo/tree/main/path/to/sql
+   GITHUB_TOKEN=your-github-token
+   ```
+
+3. Start the dev server:
+   ```bash
+   npm run dev
+   ```
+
+4. Open [http://localhost:3000](http://localhost:3000)
+
+## Project Structure
+
+```
+app/
+  page.tsx                  # Main notebook UI (single-page app)
+  api/
+    agent/route.ts          # Main endpoint — streams NDJSON agent events
+    execute/route.ts        # Direct SQL execution
+    metadata/route.ts       # Schema introspection cache
+    metrics/route.ts        # Statsig metric catalog
+    library/route.ts        # Query library listing
+lib/
+  agent-loop.ts             # Core orchestrator
+  anthropic.ts              # LLM calls and system prompts
+  trino-mcp.ts              # Trino MCP subprocess client
+  metadata.ts               # Schema metadata cache
+  statsig.ts                # Statsig Console API client
+  metric-catalog.ts         # Metric catalog cache + matching
+  github-queries.ts         # GitHub query library
+  query-matcher.ts          # Local query library matching
+  sql-validator.ts          # Read-only SQL enforcement
+components/
+  chat-input.tsx            # Question input
+  sql-editor.tsx            # SQL display/editor
+  analysis-card.tsx         # Markdown analysis renderer
+  chart-renderer.tsx        # Recharts visualization
+  schema-explorer.tsx       # Sidebar schema browser
+  query-library.tsx         # Sidebar query library
+  metrics-catalog.tsx       # Sidebar metrics catalog
+query-library/              # Local .sql files with metadata headers
+domain-context.md           # Business terminology for LLM prompts
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Reference Priority
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+When generating SQL, the LLM uses context in this priority order:
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+1. **Metric catalog** (Statsig) — Authoritative metric definitions with aggregation formulas
+2. **Local query library** — Vetted production SQL in `query-library/`
+3. **Shared GitHub queries** — Team-shared SQL from configured GitHub repo
+4. **Schema metadata** — Table and column definitions from Trino introspection
 
-## Learn More
+## Tech Stack
 
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Next.js 16 (App Router) · React 19 · TypeScript · Tailwind CSS v4 · shadcn/ui · Recharts · Anthropic SDK · node-sql-parser

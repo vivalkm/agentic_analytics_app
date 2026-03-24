@@ -153,8 +153,8 @@ class TrinoMCPClient {
       const id = this.nextId++;
       const timeout = setTimeout(() => {
         this.pendingRequests.delete(id);
-        reject(new Error(`MCP tool call '${name}' timed out after 120s`));
-      }, 120000);
+        reject(new Error(`MCP tool call '${name}' timed out after 300s`));
+      }, 300000);
 
       this.pendingRequests.set(id, {
         resolve: (val) => {
