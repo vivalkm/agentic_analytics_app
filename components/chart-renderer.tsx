@@ -47,12 +47,22 @@ function formatValue(value: unknown): string {
 function formatXLabel(value: unknown): string {
   if (value === null || value === undefined) return '';
   const s = String(value);
-  // Shorten date strings for display
+  // Show full yyyy-mm-dd for date strings
   if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
-    return s.substring(5, 10); // MM-DD
+    return s.substring(0, 10);
   }
   // Truncate long labels
   return s.length > 15 ? s.substring(0, 12) + '...' : s;
+}
+
+/** Check if the x-axis data contains date-like values. */
+function hasDateXAxis(rows: Record<string, unknown>[], xKey: string): boolean {
+  for (const row of rows) {
+    const v = row[xKey];
+    if (v && /^\d{4}-\d{2}-\d{2}/.test(String(v))) return true;
+    if (v !== null && v !== undefined) break; // only need to check first non-null
+  }
+  return false;
 }
 
 /**
@@ -149,7 +159,17 @@ export function ChartRenderer({ config, results }: ChartRendererProps) {
     return null;
   }, [isGrouped, config.yKeys, chartData]);
 
+  const isDateAxis = hasDateXAxis(results.rows, config.xKey);
+
   if (config.type === 'none' || chartData.length === 0 || !hasData) return null;
+
+  // Rotated tick props for date x-axes to avoid label crowding
+  const xTickProps: Record<string, unknown> = isDateAxis
+    ? { fontSize: 11, fill: 'hsl(0, 0%, 55%)', angle: -45, textAnchor: 'end', dy: 8 }
+    : { fontSize: 11, fill: 'hsl(0, 0%, 55%)' };
+
+  // Extra bottom margin for rotated labels
+  const bottomMargin = isDateAxis ? 50 : 5;
 
   const commonTooltipStyle = {
     contentStyle: {
@@ -173,14 +193,15 @@ export function ChartRenderer({ config, results }: ChartRendererProps) {
       )}
       <ResponsiveContainer width="100%" height={300}>
         {config.type === 'bar' ? (
-          <BarChart data={chartData} margin={{ top: 5, right: dualAxis ? 10 : 10, left: 10, bottom: 5 }}>
+          <BarChart data={chartData} margin={{ top: 5, right: dualAxis ? 10 : 10, left: 10, bottom: bottomMargin }}>
             <CartesianGrid strokeDasharray="3 3" stroke="hsl(240, 6%, 20%)" />
             <XAxis
               dataKey={config.xKey}
               tickFormatter={formatXLabel}
-              tick={{ fontSize: 11, fill: 'hsl(0, 0%, 55%)' }}
+              tick={xTickProps}
               axisLine={{ stroke: 'hsl(240, 6%, 20%)' }}
               tickLine={false}
+              height={isDateAxis ? 70 : 30}
             />
             {dualAxis && !isGrouped ? (
               <>
@@ -244,14 +265,15 @@ export function ChartRenderer({ config, results }: ChartRendererProps) {
                 ))}
           </BarChart>
         ) : config.type === 'line' ? (
-          <LineChart data={chartData} margin={{ top: 5, right: dualAxis ? 10 : 10, left: 10, bottom: 5 }}>
+          <LineChart data={chartData} margin={{ top: 5, right: dualAxis ? 10 : 10, left: 10, bottom: bottomMargin }}>
             <CartesianGrid strokeDasharray="3 3" stroke="hsl(240, 6%, 20%)" />
             <XAxis
               dataKey={config.xKey}
               tickFormatter={formatXLabel}
-              tick={{ fontSize: 11, fill: 'hsl(0, 0%, 55%)' }}
+              tick={xTickProps}
               axisLine={{ stroke: 'hsl(240, 6%, 20%)' }}
               tickLine={false}
+              height={isDateAxis ? 70 : 30}
             />
             {dualAxis ? (
               <>
