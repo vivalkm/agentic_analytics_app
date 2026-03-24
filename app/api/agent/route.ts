@@ -2,13 +2,17 @@ import { runAgentLoop } from '@/lib/agent-loop';
 
 export async function POST(request: Request) {
   try {
-    const { question, history } = await request.json();
+    const { question, history, attachments } = await request.json();
 
     if (!question || typeof question !== 'string') {
       return Response.json({ error: 'Question is required' }, { status: 400 });
     }
 
-    const stream = runAgentLoop(question, Array.isArray(history) ? history : undefined);
+    const stream = runAgentLoop(
+      question,
+      Array.isArray(history) ? history : undefined,
+      Array.isArray(attachments) ? attachments : undefined,
+    );
 
     return new Response(stream, {
       headers: {

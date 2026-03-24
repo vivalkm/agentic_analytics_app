@@ -1,4 +1,4 @@
-import { AgentEvent, QueryResult, TableMetadata, ConversationTurn } from './types';
+import { AgentEvent, QueryResult, TableMetadata, ConversationTurn, Attachment } from './types';
 import {
   generateSQL,
   analyzeResults,
@@ -144,7 +144,7 @@ function getUnusedTables(
  * Run the agentic query loop.
  * Returns an NDJSON ReadableStream of AgentEvent objects.
  */
-export function runAgentLoop(question: string, history?: ConversationTurn[]): ReadableStream {
+export function runAgentLoop(question: string, history?: ConversationTurn[], attachments?: Attachment[]): ReadableStream {
   return new ReadableStream({
     async start(controller) {
       try {
@@ -168,9 +168,9 @@ export function runAgentLoop(question: string, history?: ConversationTurn[]): Re
         }
 
         let relevantTables = findRelevantTables(question);
-        const relevantQueries = matchQueries(question);
-        const relevantGitHubQueries = matchGitHubQueries(question);
-        const relevantMetrics = matchMetrics(question);
+        const relevantQueries = matchQueries(question, 5);
+        const relevantGitHubQueries = matchGitHubQueries(question, 5);
+        const relevantMetrics = matchMetrics(question, 10);
 
         // Log what references were found (priority order)
         const refSources: string[] = [];
@@ -256,7 +256,7 @@ export function runAgentLoop(question: string, history?: ConversationTurn[]): Re
           try {
             let stream: ReadableStream;
             if (iteration === 1) {
-              stream = await generateSQL(question, relevantTables, relevantQueries, history, relevantMetrics, relevantGitHubQueries);
+              stream = await generateSQL(question, relevantTables, relevantQueries, history, relevantMetrics, relevantGitHubQueries, attachments);
             } else {
               // Build context about what was already tried
               const unusedTables = getUnusedTables(relevantTables, usedTableNames);
@@ -270,7 +270,8 @@ export function runAgentLoop(question: string, history?: ConversationTurn[]): Re
                 relevantQueries,
                 unusedTables,
                 relevantMetrics,
-                relevantGitHubQueries
+                relevantGitHubQueries,
+                attachments,
               );
             }
             // Stream the SQL generation to the client token-by-token
@@ -496,7 +497,8 @@ export function runAgentLoop(question: string, history?: ConversationTurn[]): Re
                 relevantQueries,
                 unusedTables,
                 relevantMetrics,
-                relevantGitHubQueries
+                relevantGitHubQueries,
+                attachments,
               );
               const revisedResponse = await streamSQLGeneration(controller, revisedStream, iteration + 1);
               const revisedSQL = extractSQL(revisedResponse);
@@ -589,7 +591,8 @@ export function runAgentLoop(question: string, history?: ConversationTurn[]): Re
                     relevantQueries,
                     unusedTables,
                     relevantMetrics,
-                    relevantGitHubQueries
+                    relevantGitHubQueries,
+                    attachments,
                   );
                   const revisedResponse = await streamSQLGeneration(controller, revisedStream, iteration + 1);
                   const revisedSQL = extractSQL(revisedResponse);

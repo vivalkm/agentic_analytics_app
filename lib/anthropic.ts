@@ -1,7 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { TableMetadata, QueryResult, QueryLibraryEntry, MetricEntry, ValidationResult, ConversationTurn } from './types';
+import { TableMetadata, QueryResult, QueryLibraryEntry, MetricEntry, ValidationResult, ConversationTurn, Attachment } from './types';
 
 /** Load domain context file (cached after first read). */
 let _domainContext: string | null = null;
@@ -28,6 +28,7 @@ const getModel = () => process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-20250514'
 
 const SQL_SYSTEM_PROMPT = `You are a SQL analyst for a Trino-based data lakehouse. You write precise, efficient Trino SQL.
 Today's date is ${new Date().toISOString().slice(0, 10)}. When the user refers to relative time periods ("this month", "this quarter", "last year", "in March") without specifying a year, always assume the CURRENT year (${new Date().getFullYear()}) or use CURRENT_DATE-based expressions. Never default to a past year.
+DEFAULT TIME WINDOW: If the user's question does NOT mention any specific time period, date range, or relative time reference, default to the most recent 12 months (CURRENT_DATE - INTERVAL '12' MONTH to CURRENT_DATE). Always include an explicit date filter — never query without a time boundary.
 
 REFERENCE PRIORITY (use in this order):
 1. **Metric catalog** (Statsig): If a matched metric definition is provided below, use its definition (aggregation, column, filters) and backing SQL as the primary reference. The metric catalog is the authoritative source for how business metrics are calculated.
@@ -206,13 +207,59 @@ function buildHistoryMessages(history?: ConversationTurn[]): Anthropic.MessagePa
   return messages;
 }
 
+/**
+ * Build multi-part user message content with optional attachments.
+ * Images → ImageBlockParam, PDFs → DocumentBlockParam, CSV/TXT → TextBlockParam.
+ */
+function buildUserContent(
+  text: string,
+  attachments?: Attachment[]
+): string | Anthropic.MessageCreateParams['messages'][number]['content'] {
+  if (!attachments || attachments.length === 0) return text;
+
+  const parts: Anthropic.Messages.ContentBlockParam[] = [];
+
+  for (const att of attachments) {
+    if (att.mediaType.startsWith('image/')) {
+      parts.push({
+        type: 'image',
+        source: {
+          type: 'base64',
+          data: att.data,
+          media_type: att.mediaType as 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp',
+        },
+      });
+    } else if (att.mediaType === 'application/pdf') {
+      parts.push({
+        type: 'document',
+        source: {
+          type: 'base64',
+          data: att.data,
+          media_type: 'application/pdf',
+        },
+      });
+    } else {
+      // CSV/TXT: include as a labelled text block
+      parts.push({
+        type: 'text',
+        text: `--- Attached file: ${att.name} ---\n${att.data}`,
+      });
+    }
+  }
+
+  // The question text goes last so the model sees it after the attachments
+  parts.push({ type: 'text', text });
+  return parts;
+}
+
 export async function generateSQL(
   question: string,
   relevantTables: TableMetadata[],
   relevantQueries: QueryLibraryEntry[],
   history?: ConversationTurn[],
   relevantMetrics?: MetricEntry[],
-  relevantGitHubQueries?: QueryLibraryEntry[]
+  relevantGitHubQueries?: QueryLibraryEntry[],
+  attachments?: Attachment[],
 ): Promise<ReadableStream> {
   const metricContext = buildMetricContext(relevantMetrics ?? []);
 
@@ -246,7 +293,7 @@ export async function generateSQL(
 
   const messages: Anthropic.MessageParam[] = [
     ...buildHistoryMessages(history),
-    { role: 'user', content: question },
+    { role: 'user', content: buildUserContent(question, attachments) },
   ];
 
   const client = getClient();
@@ -448,7 +495,8 @@ export async function generateRevisedSQL(
   relevantQueries: QueryLibraryEntry[],
   unusedTables?: TableMetadata[],
   relevantMetrics?: MetricEntry[],
-  relevantGitHubQueries?: QueryLibraryEntry[]
+  relevantGitHubQueries?: QueryLibraryEntry[],
+  attachments?: Attachment[],
 ): Promise<ReadableStream> {
   const metricContext = buildMetricContext(relevantMetrics ?? []);
 
@@ -505,7 +553,7 @@ export async function generateRevisedSQL(
     max_tokens: 4096,
     system: systemPrompt,
     messages: [
-      { role: 'user', content: question },
+      { role: 'user', content: buildUserContent(question, attachments) },
       { role: 'assistant', content: `\`\`\`sql\n${previousSQL}\n\`\`\`` },
       { role: 'user', content: fixMessage },
     ],

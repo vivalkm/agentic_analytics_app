@@ -8,7 +8,7 @@ import { ThinkingStep } from '@/components/thinking-step';
 import { ChartRenderer } from '@/components/chart-renderer';
 import { CSVDownload } from '@/components/csv-download';
 import { RawDataPreview } from '@/components/raw-data-preview';
-import { NotebookCell, QueryResult, AgentEvent, ConversationTurn } from '@/lib/types';
+import { NotebookCell, QueryResult, AgentEvent, ConversationTurn, Attachment } from '@/lib/types';
 import { loadSession, saveSession, generateCellId } from '@/lib/session';
 import { detectChartType } from '@/lib/chart-detector';
 import { SchemaExplorer } from '@/components/schema-explorer';
@@ -204,14 +204,40 @@ export default function Home() {
    * Stream the agent response, processing NDJSON events into cells.
    */
   const streamAgentResponse = useCallback(
-    async (question: string) => {
+    async (question: string, files?: File[]) => {
       const agentRunId = `run-${Date.now()}`;
+
+      // Convert files to Attachment objects
+      let attachments: Attachment[] | undefined;
+      if (files && files.length > 0) {
+        attachments = await Promise.all(
+          files.map(
+            (file) =>
+              new Promise<Attachment>((resolve) => {
+                if (file.type === 'text/csv' || file.type === 'text/plain') {
+                  const reader = new FileReader();
+                  reader.onload = () =>
+                    resolve({ name: file.name, mediaType: file.type, data: reader.result as string });
+                  reader.readAsText(file);
+                } else {
+                  const reader = new FileReader();
+                  reader.onload = () => {
+                    const dataUrl = reader.result as string;
+                    const base64 = dataUrl.split(',')[1] || '';
+                    resolve({ name: file.name, mediaType: file.type, data: base64 });
+                  };
+                  reader.readAsDataURL(file);
+                }
+              })
+          )
+        );
+      }
 
       // Add question cell
       addCell({
         id: generateCellId(),
         type: 'question',
-        content: question,
+        content: question + (attachments ? ` [${attachments.length} file${attachments.length > 1 ? 's' : ''} attached]` : ''),
         timestamp: Date.now(),
         metadata: { agentRunId },
       });
@@ -234,7 +260,7 @@ export default function Home() {
         const res = await fetch('/api/agent', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ question, history }),
+          body: JSON.stringify({ question, history, attachments }),
         });
 
         if (!res.ok) {

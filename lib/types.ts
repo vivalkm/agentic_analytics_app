@@ -82,6 +82,15 @@ export interface MetricCatalogCache {
   lastSynced: string;
 }
 
+export interface Attachment {
+  /** Original filename */
+  name: string;
+  /** MIME type: image/png, image/jpeg, application/pdf, text/csv, text/plain */
+  mediaType: string;
+  /** Base64-encoded data for images/PDFs, or raw text content for CSV/TXT */
+  data: string;
+}
+
 export interface MetadataCache {
   catalogs: string[];
   schemas: Record<string, string[]>;
