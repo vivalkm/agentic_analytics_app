@@ -1,7 +1,8 @@
 import type { Metadata } from 'next';
 import { Inter, JetBrains_Mono } from 'next/font/google';
 import { ThemeProvider } from '@/components/theme-provider';
-import { SessionProvider } from 'next-auth/react';
+import { SessionWrapper } from '@/components/session-wrapper';
+import { authEnabled } from '@/auth';
 import './globals.css';
 
 const inter = Inter({
@@ -33,11 +34,11 @@ export default function RootLayout({
       suppressHydrationWarning
     >
       <body className="min-h-full flex flex-col bg-background text-foreground">
-        <SessionProvider>
+        <SessionWrapper authEnabled={authEnabled}>
           <ThemeProvider attribute="class" defaultTheme="dark" enableSystem>
             {children}
           </ThemeProvider>
-        </SessionProvider>
+        </SessionWrapper>
       </body>
     </html>
   );

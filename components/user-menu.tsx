@@ -11,8 +11,36 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { SettingsDialog } from '@/components/settings-dialog';
+import { useAuthEnabled } from '@/components/session-wrapper';
 
 export function UserMenu() {
+  const authEnabled = useAuthEnabled();
+
+  if (!authEnabled) {
+    return <SettingsOnlyMenu />;
+  }
+
+  return <AuthUserMenu />;
+}
+
+function SettingsOnlyMenu() {
+  const [settingsOpen, setSettingsOpen] = useState(false);
+
+  return (
+    <>
+      <button
+        onClick={() => setSettingsOpen(true)}
+        className="flex h-8 items-center gap-2 rounded-md px-2 text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
+      >
+        <Settings className="h-4 w-4" />
+        <span className="hidden sm:inline">Settings</span>
+      </button>
+      <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
+    </>
+  );
+}
+
+function AuthUserMenu() {
   const { data: session } = useSession();
   const [settingsOpen, setSettingsOpen] = useState(false);
 
