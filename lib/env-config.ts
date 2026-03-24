@@ -18,6 +18,7 @@ export const MANAGED_KEYS: ManagedKey[] = [
   { key: 'TRINO_PRIORITY_SCHEMAS', label: 'Priority Schemas', group: 'trino', secret: false, placeholder: 'fpa,marketing' },
   { key: 'TRINO_PRIORITY_TABLES', label: 'Priority Tables', group: 'trino', secret: false, placeholder: 'lakehouse.fpa.table1' },
   { key: 'STATSIG_CONSOLE_API_KEY', label: 'Console API Key', group: 'statsig', secret: true, placeholder: 'console-...' },
+  { key: 'STATSIG_METRIC_TEAMS', label: 'Metric Owners (teams)', group: 'statsig', secret: false, placeholder: 'squad-FPA,squad-INTA' },
   { key: 'QUERY_LIBRARY_REPO', label: 'Query Library Repo', group: 'github', secret: false, placeholder: 'https://github.com/org/repo' },
   { key: 'GITHUB_TOKEN', label: 'GitHub Token', group: 'github', secret: true, placeholder: 'ghp_...' },
 ];

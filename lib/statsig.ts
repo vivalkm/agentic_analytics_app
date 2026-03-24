@@ -1,18 +1,21 @@
 import { MetricEntry } from './types';
+import { getEnv } from './env-config';
 
 const STATSIG_BASE_URL = 'https://statsigapi.net';
 const MAX_PER_PAGE = 100;
 
-/** Team filter for metric sources. Comma-separated, case-insensitive. */
-const METRIC_TEAM_FILTER = new Set(
-  (process.env.STATSIG_METRIC_TEAMS || 'squad-FPA,squad-INTA')
-    .split(',')
-    .map((t) => t.trim().toLowerCase())
-    .filter(Boolean)
-);
+/** Team filter for metric sources. Comma-separated, case-insensitive. Re-evaluated each call so settings changes take effect. */
+function getMetricTeamFilter(): Set<string> {
+  return new Set(
+    (getEnv('STATSIG_METRIC_TEAMS') || 'squad-FPA,squad-INTA')
+      .split(',')
+      .map((t) => t.trim().toLowerCase())
+      .filter(Boolean)
+  );
+}
 
 function getApiKey(): string {
-  const key = process.env.STATSIG_CONSOLE_API_KEY;
+  const key = getEnv('STATSIG_CONSOLE_API_KEY');
   if (!key) throw new Error('STATSIG_CONSOLE_API_KEY is not set');
   return key;
 }
@@ -80,11 +83,11 @@ export async function fetchMetricSources(): Promise<MetricSource[]> {
   }
 
   const filtered = allSources.filter(
-    (s) => METRIC_TEAM_FILTER.has((s.team || '').toLowerCase())
+    (s) => getMetricTeamFilter().has((s.team || '').toLowerCase())
   );
 
   console.log(
-    `[statsig] Fetched ${allSources.length} metric sources total, ${filtered.length} matching teams [${[...METRIC_TEAM_FILTER].join(', ')}]`
+    `[statsig] Fetched ${allSources.length} metric sources total, ${filtered.length} matching teams [${[...getMetricTeamFilter()].join(', ')}]`
   );
 
   return filtered;
@@ -148,11 +151,11 @@ export async function fetchDerivedMetrics(): Promise<DerivedMetric[]> {
   }
 
   const filtered = allMetrics.filter(
-    (m) => METRIC_TEAM_FILTER.has((m.team || '').toLowerCase())
+    (m) => getMetricTeamFilter().has((m.team || '').toLowerCase())
   );
 
   console.log(
-    `[statsig] Fetched ${allMetrics.length} derived metrics total, ${filtered.length} matching teams [${[...METRIC_TEAM_FILTER].join(', ')}]`
+    `[statsig] Fetched ${allMetrics.length} derived metrics total, ${filtered.length} matching teams [${[...getMetricTeamFilter()].join(', ')}]`
   );
 
   return filtered;
