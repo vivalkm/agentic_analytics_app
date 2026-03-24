@@ -1,8 +1,13 @@
+import { auth } from '@/auth';
 import { analyzeResults } from '@/lib/anthropic';
 import { QueryResult } from '@/lib/types';
 
 export async function POST(request: Request) {
   try {
+    const session = await auth();
+    if (!session?.user?.email) {
+      return Response.json({ error: 'Unauthorized' }, { status: 401 });
+    }
     const { question, sql, results } = await request.json();
 
     if (!question || !sql || !results) {

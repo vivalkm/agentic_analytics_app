@@ -1,7 +1,15 @@
+import { auth } from '@/auth';
 import { runAgentLoop } from '@/lib/agent-loop';
+import { getEffectiveConfig } from '@/lib/user-config';
 
 export async function POST(request: Request) {
   try {
+    const session = await auth();
+    if (!session?.user?.email) {
+      return Response.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const userConfig = getEffectiveConfig(session.user.email);
     const { question, history, attachments } = await request.json();
 
     if (!question || typeof question !== 'string') {
@@ -12,6 +20,7 @@ export async function POST(request: Request) {
       question,
       Array.isArray(history) ? history : undefined,
       Array.isArray(attachments) ? attachments : undefined,
+      userConfig,
     );
 
     return new Response(stream, {

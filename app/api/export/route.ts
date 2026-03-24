@@ -1,5 +1,11 @@
+import { auth } from '@/auth';
+
 export async function POST(request: Request) {
   try {
+    const session = await auth();
+    if (!session?.user?.email) {
+      return Response.json({ error: 'Unauthorized' }, { status: 401 });
+    }
     const { columns, rows, filename } = await request.json();
 
     if (!columns || !rows) {

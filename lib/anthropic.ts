@@ -18,13 +18,19 @@ function getDomainContext(): string {
   return _domainContext;
 }
 
-const getClient = () =>
+/** Optional per-user overrides for LLM calls. */
+export interface LLMOverrides {
+  apiKey?: string;
+  model?: string;
+}
+
+const getClient = (overrides?: LLMOverrides) =>
   new Anthropic({
-    apiKey: process.env.ANTHROPIC_API_KEY,
+    apiKey: overrides?.apiKey || process.env.ANTHROPIC_API_KEY,
     baseURL: process.env.ANTHROPIC_BASE_URL || undefined,
   });
 
-const getModel = () => process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-20250514';
+const getModel = (overrides?: LLMOverrides) => overrides?.model || process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-20250514';
 
 const SQL_SYSTEM_PROMPT = `You are a SQL analyst for a Trino-based data lakehouse. You write precise, efficient Trino SQL.
 Today's date is ${new Date().toISOString().slice(0, 10)}. When the user refers to relative time periods ("this month", "this quarter", "last year", "in March") without specifying a year, always assume the CURRENT year (${new Date().getFullYear()}) or use CURRENT_DATE-based expressions. Never default to a past year.
@@ -260,6 +266,7 @@ export async function generateSQL(
   relevantMetrics?: MetricEntry[],
   relevantGitHubQueries?: QueryLibraryEntry[],
   attachments?: Attachment[],
+  overrides?: LLMOverrides,
 ): Promise<ReadableStream> {
   const metricContext = buildMetricContext(relevantMetrics ?? []);
 
@@ -296,9 +303,9 @@ export async function generateSQL(
     { role: 'user', content: buildUserContent(question, attachments) },
   ];
 
-  const client = getClient();
+  const client = getClient(overrides);
   const stream = client.messages.stream({
-    model: getModel(),
+    model: getModel(overrides),
     max_tokens: 4096,
     system: systemPrompt,
     messages,
@@ -324,7 +331,8 @@ export async function analyzeResults(
   question: string,
   sql: string,
   results: QueryResult,
-  history?: ConversationTurn[]
+  history?: ConversationTurn[],
+  overrides?: LLMOverrides,
 ): Promise<ReadableStream> {
   const resultsPreview = results.rows.slice(0, 50);
   const resultsText = JSON.stringify(resultsPreview, null, 2);
@@ -346,9 +354,9 @@ Column names and types: ${results.columns.map((c, i) => `${c} (${results.columnT
     { role: 'user', content: userContent },
   ];
 
-  const client = getClient();
+  const client = getClient(overrides);
   const stream = client.messages.stream({
-    model: getModel(),
+    model: getModel(overrides),
     max_tokens: 4096,
     system: ANALYSIS_SYSTEM_PROMPT,
     messages,
@@ -374,7 +382,8 @@ export async function fixSQL(
   originalSQL: string,
   error: string,
   question: string,
-  relevantTables: TableMetadata[]
+  relevantTables: TableMetadata[],
+  overrides?: LLMOverrides,
 ): Promise<ReadableStream> {
   const tableContext = buildTableContext(relevantTables);
   const domain = getDomainContext();
@@ -384,9 +393,9 @@ export async function fixSQL(
     '\n\nAvailable tables and their schemas:\n' +
     tableContext;
 
-  const client = getClient();
+  const client = getClient(overrides);
   const stream = client.messages.stream({
-    model: getModel(),
+    model: getModel(overrides),
     max_tokens: 4096,
     system: systemPrompt,
     messages: [
@@ -427,6 +436,7 @@ export async function validateResults(
   sql: string,
   results: QueryResult,
   availableTables?: TableMetadata[],
+  overrides?: LLMOverrides,
 ): Promise<ValidationResult> {
   // Detect date ranges in results
   const dateInfo = detectDateRange(results);
@@ -451,9 +461,9 @@ ${dateInfo ? `- Date range in data: ${dateInfo.min} to ${dateInfo.max} (column: 
 Sample rows (first ${sampleRows.length}):
 ${JSON.stringify(sampleRows, null, 2)}${tablesList}`;
 
-  const client = getClient();
+  const client = getClient(overrides);
   const response = await client.messages.create({
-    model: getModel(),
+    model: getModel(overrides),
     max_tokens: 512,
     system: VALIDATION_SYSTEM_PROMPT,
     messages: [{ role: 'user', content: userContent }],
@@ -497,6 +507,7 @@ export async function generateRevisedSQL(
   relevantMetrics?: MetricEntry[],
   relevantGitHubQueries?: QueryLibraryEntry[],
   attachments?: Attachment[],
+  overrides?: LLMOverrides,
 ): Promise<ReadableStream> {
   const metricContext = buildMetricContext(relevantMetrics ?? []);
 
@@ -547,9 +558,9 @@ export async function generateRevisedSQL(
     .filter(Boolean)
     .join('\n');
 
-  const client = getClient();
+  const client = getClient(overrides);
   const stream = client.messages.stream({
-    model: getModel(),
+    model: getModel(overrides),
     max_tokens: 4096,
     system: systemPrompt,
     messages: [
@@ -610,6 +621,7 @@ export async function reviewSQL(
   question: string,
   sql: string,
   tables: TableMetadata[],
+  overrides?: LLMOverrides,
 ): Promise<SQLReviewResult> {
   const tableContext = buildTableContext(tables);
 
@@ -626,9 +638,9 @@ ${tableContext}`;
   const domain = getDomainContext();
   const systemPrompt = SQL_REVIEW_SYSTEM_PROMPT + (domain ? `\n\n${domain}` : '');
 
-  const client = getClient();
+  const client = getClient(overrides);
   const response = await client.messages.create({
-    model: getModel(),
+    model: getModel(overrides),
     max_tokens: 2048,
     system: systemPrompt,
     messages: [{ role: 'user', content: userContent }],

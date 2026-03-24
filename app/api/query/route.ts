@@ -1,9 +1,14 @@
+import { auth } from '@/auth';
 import { generateSQL } from '@/lib/anthropic';
 import { findRelevantTables, ensureMetadataLoading, isRefreshing } from '@/lib/metadata';
 import { matchQueries, loadQueryLibrary, getQueryLibrary } from '@/lib/query-matcher';
 
 export async function POST(request: Request) {
   try {
+    const session = await auth();
+    if (!session?.user?.email) {
+      return Response.json({ error: 'Unauthorized' }, { status: 401 });
+    }
     const { question } = await request.json();
 
     if (!question || typeof question !== 'string') {

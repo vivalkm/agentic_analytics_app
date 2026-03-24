@@ -14,6 +14,7 @@ import { detectChartType } from '@/lib/chart-detector';
 import { SchemaExplorer } from '@/components/schema-explorer';
 import { QueryLibrary } from '@/components/query-library';
 import { MetricsCatalog } from '@/components/metrics-catalog';
+import { UserMenu } from '@/components/user-menu';
 import { Database, Trash2, Loader2, Sparkles, Play, Search, CheckCircle2, PanelLeft, PanelLeftClose, Menu, ArrowDown, Sun, Moon, Keyboard, MessageCircleQuestion, RefreshCw, DatabaseZap, Heart } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
@@ -848,6 +849,8 @@ export default function Home() {
                 <TooltipContent>Clear session</TooltipContent>
               </Tooltip>
             )}
+
+            <UserMenu />
           </div>
         </header>
 
