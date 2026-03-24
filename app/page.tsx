@@ -68,6 +68,7 @@ export default function Home() {
   const [streamingSQL, setStreamingSQL] = useState('');
   const [isExecuting, setIsExecuting] = useState(false); // For manual re-runs
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarWidth, setSidebarWidth] = useState(280);
   const [mobileSheetOpen, setMobileSheetOpen] = useState(false);
   const [prefillValue, setPrefillValue] = useState('');
   const [prefillKey, setPrefillKey] = useState(0);
@@ -81,6 +82,33 @@ export default function Home() {
   const cellsRef = useRef(cells);
   cellsRef.current = cells;
   const isNearBottomRef = useRef(true);
+
+  const isDragging = useRef(false);
+
+  const handleResizeStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    isDragging.current = true;
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+
+    const onMouseMove = (ev: MouseEvent) => {
+      if (!isDragging.current) return;
+      const maxWidth = window.innerWidth * 0.3;
+      const clamped = Math.min(Math.max(ev.clientX, 200), maxWidth);
+      setSidebarWidth(clamped);
+    };
+
+    const onMouseUp = () => {
+      isDragging.current = false;
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+    };
+
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+  }, []);
 
   // Avoid hydration mismatch for theme
   useEffect(() => setMounted(true), []);
@@ -670,12 +698,23 @@ export default function Home() {
       {/* Desktop sidebar */}
       <aside
         className={cn(
-          'hidden md:flex flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground transition-[width] duration-200 ease-in-out overflow-hidden',
-          sidebarOpen ? 'w-[280px] min-w-[280px]' : 'w-0 min-w-0'
+          'hidden md:flex flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground overflow-hidden',
+          !sidebarOpen && 'w-0 min-w-0 transition-[width] duration-200 ease-in-out'
         )}
+        style={sidebarOpen ? { width: sidebarWidth, minWidth: sidebarWidth } : undefined}
       >
         {sidebarOpen && sidebarContent}
       </aside>
+
+      {/* Sidebar resize handle */}
+      {sidebarOpen && (
+        <div
+          onMouseDown={handleResizeStart}
+          className="hidden md:flex w-1 cursor-col-resize items-center justify-center hover:bg-primary/20 active:bg-primary/30 transition-colors group"
+        >
+          <div className="h-8 w-0.5 rounded-full bg-border group-hover:bg-primary/50 group-active:bg-primary transition-colors" />
+        </div>
+      )}
 
       {/* Mobile sidebar (Sheet) — only mount content when open to avoid duplicate fetches */}
       <Sheet open={mobileSheetOpen} onOpenChange={setMobileSheetOpen}>

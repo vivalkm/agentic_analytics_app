@@ -116,7 +116,19 @@ export function ChartRenderer({ config, results }: ChartRendererProps) {
   const isGrouped = config.groupKey && groupValues.length > 0;
   const chartData = isGrouped ? pivotedData : data;
 
-  if (config.type === 'none' || chartData.length === 0) return null;
+  // Check if there's any meaningful numeric data to display
+  const hasData = useMemo(() => {
+    if (chartData.length === 0) return false;
+    const keys = isGrouped ? groupValues : config.yKeys;
+    return chartData.some((row) =>
+      keys.some((k) => {
+        const v = Number(row[k]);
+        return !isNaN(v) && v !== 0;
+      })
+    );
+  }, [chartData, isGrouped, groupValues, config.yKeys]);
+
+  if (config.type === 'none' || chartData.length === 0 || !hasData) return null;
 
   const commonTooltipStyle = {
     contentStyle: {
