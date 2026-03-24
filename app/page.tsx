@@ -14,7 +14,7 @@ import { detectChartType } from '@/lib/chart-detector';
 import { SchemaExplorer } from '@/components/schema-explorer';
 import { QueryLibrary } from '@/components/query-library';
 import { MetricsCatalog } from '@/components/metrics-catalog';
-import { Database, Trash2, Loader2, Sparkles, Play, Search, CheckCircle2, PanelLeft, PanelLeftClose, Menu, ArrowDown, Sun, Moon, Keyboard, MessageCircleQuestion, RefreshCw, DatabaseZap } from 'lucide-react';
+import { Database, Trash2, Loader2, Sparkles, Play, Search, CheckCircle2, PanelLeft, PanelLeftClose, Menu, ArrowDown, Sun, Moon, Keyboard, MessageCircleQuestion, RefreshCw, DatabaseZap, Heart } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet';
@@ -1076,6 +1076,9 @@ export default function Home() {
             />
           </div>
         </div>
+        <p className="py-1.5 text-center text-xs text-muted-foreground/50">
+          Created by Lincoln Li with <Heart className="inline h-3 w-3 fill-red-500 text-red-500 align-text-bottom" />
+        </p>
       </div>
     </div>
     </TooltipProvider>
