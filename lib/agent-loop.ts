@@ -12,6 +12,7 @@ import {
 } from './anthropic';
 import { findRelevantTables, ensureMetadataLoading, waitForRefresh, waitForPrioritySchemas, getMetadataCache, triggerBackgroundRefresh } from './metadata';
 import { matchQueries, loadQueryLibrary, getQueryLibrary } from './query-matcher';
+import { matchMetrics, ensureMetricsLoading } from './metric-catalog';
 import { validateSQL } from './sql-validator';
 import { executeTrinoMCP } from './trino-mcp';
 
@@ -149,6 +150,7 @@ export function runAgentLoop(question: string, history?: ConversationTurn[]): Re
         // Load context — wait for metadata so the LLM has table/column info
         if (getQueryLibrary().length === 0) loadQueryLibrary();
         ensureMetadataLoading();
+        ensureMetricsLoading();
 
         // Block until priority schemas are loaded (first load) so the LLM
         // never generates SQL without knowing the actual schema
@@ -165,6 +167,7 @@ export function runAgentLoop(question: string, history?: ConversationTurn[]): Re
 
         let relevantTables = findRelevantTables(question);
         const relevantQueries = matchQueries(question);
+        const relevantMetrics = matchMetrics(question);
 
         // If no relevant tables found, check if we have ANY metadata loaded
         if (relevantTables.length === 0) {
@@ -229,7 +232,7 @@ export function runAgentLoop(question: string, history?: ConversationTurn[]): Re
           try {
             let stream: ReadableStream;
             if (iteration === 1) {
-              stream = await generateSQL(question, relevantTables, relevantQueries, history);
+              stream = await generateSQL(question, relevantTables, relevantQueries, history, relevantMetrics);
             } else {
               // Build context about what was already tried
               const unusedTables = getUnusedTables(relevantTables, usedTableNames);
@@ -241,7 +244,8 @@ export function runAgentLoop(question: string, history?: ConversationTurn[]): Re
                 undefined,
                 relevantTables,
                 relevantQueries,
-                unusedTables
+                unusedTables,
+                relevantMetrics
               );
             }
             // Stream the SQL generation to the client token-by-token
@@ -305,8 +309,7 @@ export function runAgentLoop(question: string, history?: ConversationTurn[]): Re
           // --- LLM review (logical error check) ---
           try {
             emit(controller, {
-              type: 'thinking',
-              iteration,
+              type: 'progress',
               content: 'Reviewing query for logical errors...',
             });
             const review = await reviewSQL(question, currentSQL, relevantTables);
@@ -466,7 +469,8 @@ export function runAgentLoop(question: string, history?: ConversationTurn[]): Re
                 dateCheck.suggestion,
                 relevantTables,
                 relevantQueries,
-                unusedTables
+                unusedTables,
+                relevantMetrics
               );
               const revisedResponse = await streamSQLGeneration(controller, revisedStream, iteration + 1);
               const revisedSQL = extractSQL(revisedResponse);

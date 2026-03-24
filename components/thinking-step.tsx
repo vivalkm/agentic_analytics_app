@@ -62,9 +62,12 @@ export function ThinkingStep({
       </CollapsibleTrigger>
       <CollapsibleContent>
         <div className="ml-4 border-l border-border/30 pl-4 pt-2 pb-1 space-y-2">
-          <p className="text-base text-muted-foreground whitespace-pre-wrap">
-            {content}
-          </p>
+          {/* Only show full content if it's longer than the truncated summary */}
+          {content.length > 80 && (
+            <p className="text-base text-muted-foreground whitespace-pre-wrap">
+              {content}
+            </p>
+          )}
 
           {validationResult && !validationResult.valid && (
             <div className="rounded border border-amber-500/20 bg-amber-500/5 px-3 py-2 text-base">

@@ -58,6 +58,30 @@ export interface QueryLibraryEntry {
   tags: string[];
 }
 
+export interface MetricEntry {
+  id: string;
+  name: string;
+  description: string;
+  sql: string;
+  sourceName: string;
+  tags: string[];
+  /** 'source' = metric source (base table/query), 'derived' = derived metric from catalog */
+  kind: 'source' | 'derived';
+  /** Aggregation type for derived metrics (e.g. "sum", "daily_participation") */
+  aggregation?: string;
+  /** Value column for derived metrics */
+  valueColumn?: string;
+  /** Filter criteria for derived metrics (e.g. [{ type: "column", column: "status", condition: "is", values: ["completed"] }]) */
+  criteria?: Array<{ type: string; column: string; condition: string; values: string[] }>;
+  /** Metric type from Statsig (e.g. "composite", "warehouse_native") */
+  metricType?: string;
+}
+
+export interface MetricCatalogCache {
+  metrics: MetricEntry[];
+  lastSynced: string;
+}
+
 export interface MetadataCache {
   catalogs: string[];
   schemas: Record<string, string[]>;

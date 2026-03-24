@@ -1,7 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { TableMetadata, QueryResult, QueryLibraryEntry, ValidationResult, ConversationTurn } from './types';
+import { TableMetadata, QueryResult, QueryLibraryEntry, MetricEntry, ValidationResult, ConversationTurn } from './types';
 
 /** Load domain context file (cached after first read). */
 let _domainContext: string | null = null;
@@ -146,6 +146,44 @@ export function buildTableContext(tables: TableMetadata[]): string {
     .join('\n\n');
 }
 
+function buildMetricContext(metrics: MetricEntry[]): string {
+  if (metrics.length === 0) return '';
+
+  const derivedMetrics = metrics.filter((m) => m.kind === 'derived');
+  const sourceMetrics = metrics.filter((m) => m.kind === 'source');
+
+  let context = '\n\nRelevant metric definitions (from Statsig metric catalog — use these as reference for how metrics are calculated):\n';
+
+  if (derivedMetrics.length > 0) {
+    context += derivedMetrics
+      .map((m) => {
+        let detail = `### ${m.name}\n${m.description}`;
+        if (m.aggregation) detail += `\nAggregation: ${m.aggregation}`;
+        if (m.valueColumn) detail += `\nValue column: ${m.valueColumn}`;
+        if (m.sourceName) detail += `\nMetric source: ${m.sourceName}`;
+        if (m.criteria && m.criteria.length > 0) {
+          detail += `\nFilters: ${m.criteria.map((c) => `${c.column} ${c.condition} ${c.values.join(', ')}`).join('; ')}`;
+        }
+        if (m.sql) detail += `\nBacking SQL:\n\`\`\`sql\n${m.sql}\n\`\`\``;
+        return detail;
+      })
+      .join('\n\n');
+  }
+
+  if (sourceMetrics.length > 0) {
+    context +=
+      '\n\nMetric sources (base tables/queries):\n' +
+      sourceMetrics
+        .map(
+          (m) =>
+            `### ${m.name}\n${m.description}${m.sql ? `\nBacking SQL:\n\`\`\`sql\n${m.sql}\n\`\`\`` : ''}`
+        )
+        .join('\n\n');
+  }
+
+  return context;
+}
+
 function buildHistoryMessages(history?: ConversationTurn[]): Anthropic.MessageParam[] {
   const messages: Anthropic.MessageParam[] = [];
   for (const turn of history ?? []) {
@@ -163,7 +201,8 @@ export async function generateSQL(
   question: string,
   relevantTables: TableMetadata[],
   relevantQueries: QueryLibraryEntry[],
-  history?: ConversationTurn[]
+  history?: ConversationTurn[],
+  relevantMetrics?: MetricEntry[]
 ): Promise<ReadableStream> {
   const tableContext = buildTableContext(relevantTables);
 
@@ -175,13 +214,16 @@ export async function generateSQL(
           .join('\n\n')
       : '';
 
+  const metricContext = buildMetricContext(relevantMetrics ?? []);
+
   const domain = getDomainContext();
   const systemPrompt =
     SQL_SYSTEM_PROMPT +
     (domain ? `\n\n${domain}` : '') +
     '\n\nAvailable tables and their schemas:\n' +
     tableContext +
-    queryContext;
+    queryContext +
+    metricContext;
 
   const messages: Anthropic.MessageParam[] = [
     ...buildHistoryMessages(history),
@@ -385,7 +427,8 @@ export async function generateRevisedSQL(
   suggestion: string | undefined,
   relevantTables: TableMetadata[],
   relevantQueries: QueryLibraryEntry[],
-  unusedTables?: TableMetadata[]
+  unusedTables?: TableMetadata[],
+  relevantMetrics?: MetricEntry[]
 ): Promise<ReadableStream> {
   const tableContext = buildTableContext(relevantTables);
   const queryContext =
@@ -395,6 +438,8 @@ export async function generateRevisedSQL(
           .map((q) => `-- ${q.description}\n${q.sql}`)
           .join('\n\n')
       : '';
+
+  const metricContext = buildMetricContext(relevantMetrics ?? []);
 
   const unusedTableContext =
     unusedTables && unusedTables.length > 0
@@ -409,6 +454,7 @@ export async function generateRevisedSQL(
     '\n\nAvailable tables and their schemas:\n' +
     tableContext +
     queryContext +
+    metricContext +
     unusedTableContext;
 
   const fixMessage = [

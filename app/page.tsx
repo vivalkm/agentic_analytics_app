@@ -13,6 +13,7 @@ import { loadSession, saveSession, generateCellId } from '@/lib/session';
 import { detectChartType } from '@/lib/chart-detector';
 import { SchemaExplorer } from '@/components/schema-explorer';
 import { QueryLibrary } from '@/components/query-library';
+import { MetricsCatalog } from '@/components/metrics-catalog';
 import { Database, Trash2, Loader2, Sparkles, Play, Search, CheckCircle2, PanelLeft, PanelLeftClose, Menu, ArrowDown, Sun, Moon, Keyboard, MessageCircleQuestion, RefreshCw, DatabaseZap } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
@@ -643,6 +644,7 @@ export default function Home() {
       <TabsList className="mx-3 mt-3 shrink-0">
         <TabsTrigger value="schema">Schema</TabsTrigger>
         <TabsTrigger value="library">Library</TabsTrigger>
+        <TabsTrigger value="metrics">Metrics</TabsTrigger>
       </TabsList>
       <TabsContent value="schema" className="flex-1 overflow-hidden">
         <ScrollArea className="h-full">
@@ -652,6 +654,11 @@ export default function Home() {
       <TabsContent value="library" className="flex-1 overflow-hidden">
         <ScrollArea className="h-full">
           <QueryLibrary onUseQuery={handleUseQuery} />
+        </ScrollArea>
+      </TabsContent>
+      <TabsContent value="metrics" className="flex-1 overflow-hidden">
+        <ScrollArea className="h-full">
+          <MetricsCatalog onInsertMetric={handleUseQuery} />
         </ScrollArea>
       </TabsContent>
     </Tabs>
