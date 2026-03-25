@@ -1,6 +1,6 @@
 import { NotebookCell } from './types';
 
-const SESSION_KEY = 'lakehouse-analytics-session';
+const SESSION_KEY = 'cortex-analytics-session';
 
 /**
  * Strip large data from cells before persisting to localStorage.

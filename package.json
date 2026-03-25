@@ -1,5 +1,5 @@
 {
-  "name": "lakehouse-analytics",
+  "name": "cortex-analytics",
   "version": "0.1.0",
   "private": true,
   "scripts": {

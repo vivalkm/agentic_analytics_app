@@ -58,7 +58,7 @@ export function ApiKeyPrompt({
             <KeyRound className="h-5 w-5 text-primary" />
           </div>
           <div>
-            <h2 className="text-lg font-semibold">Welcome to Lakehouse Analytics</h2>
+            <h2 className="text-lg font-semibold">Welcome to Cortex Analytics</h2>
             <p className="text-sm text-muted-foreground">Enter your Anthropic API key to get started</p>
           </div>
         </div>

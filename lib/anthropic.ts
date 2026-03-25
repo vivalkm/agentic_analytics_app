@@ -370,7 +370,7 @@ Column names and types: ${results.columns.map((c, i) => `${c} (${results.columnT
   const client = getClient();
   const stream = client.messages.stream({
     model: getModel(),
-    max_tokens: 4096,
+    max_tokens: 8192,
     system: ANALYSIS_SYSTEM_PROMPT,
     messages,
   });

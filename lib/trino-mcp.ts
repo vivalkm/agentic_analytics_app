@@ -128,7 +128,7 @@ class TrinoMCPClient {
         params: {
           protocolVersion: '2024-11-05',
           capabilities: {},
-          clientInfo: { name: 'lakehouse-analytics', version: '0.1.0' },
+          clientInfo: { name: 'cortex-analytics', version: '0.1.0' },
         },
       });
     });

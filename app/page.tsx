@@ -837,7 +837,10 @@ export default function Home() {
               <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary/10">
                 <Database className="h-4 w-4 text-primary" />
               </div>
-              <h1 className="text-base font-semibold tracking-tight">Lakehouse Analytics</h1>
+              <div>
+                <h1 className="text-base font-semibold tracking-tight leading-none">Cortex Analytics</h1>
+                <p className="text-[10px] text-muted-foreground/60 leading-tight mt-0.5">Full-stack autonomous analytics system</p>
+              </div>
             </div>
           </div>
           <div className="flex items-center gap-0.5">
@@ -927,8 +930,11 @@ export default function Home() {
                 <Database className="h-8 w-8 text-primary" />
               </div>
               <h2 className="text-2xl font-bold tracking-tight text-foreground">
-                Lakehouse Analytics
+                Cortex Analytics
               </h2>
+              <p className="mt-1 text-sm text-muted-foreground/70">
+                Full-stack autonomous analytics system
+              </p>
               <p className="mt-3 max-w-lg text-lg leading-relaxed text-muted-foreground">
                 Ask questions about your data in plain English. I&apos;ll generate
                 SQL, run it against your Trino lakehouse, and analyze the results.

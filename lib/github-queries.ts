@@ -96,7 +96,7 @@ async function githubFetch(apiPath: string): Promise<unknown> {
   const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
   const headers: Record<string, string> = {
     Accept: 'application/vnd.github.v3+json',
-    'User-Agent': 'lakehouse-analytics',
+    'User-Agent': 'cortex-analytics',
   };
   if (token) {
     headers.Authorization = `Bearer ${token}`;
@@ -135,7 +135,7 @@ async function fetchFileContent(config: RepoConfig, filePath: string): Promise<s
   const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
   const headers: Record<string, string> = {
     Accept: 'application/vnd.github.v3.raw',
-    'User-Agent': 'lakehouse-analytics',
+    'User-Agent': 'cortex-analytics',
   };
   if (token) {
     headers.Authorization = `Bearer ${token}`;

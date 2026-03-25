@@ -16,8 +16,8 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: 'Lakehouse Analytics',
-  description: 'Self-hosted analytics notebook for your Trino lakehouse',
+  title: 'Cortex Analytics',
+  description: 'Full-stack autonomous analytics system',
 };
 
 export default function RootLayout({
