@@ -82,6 +82,7 @@ Rules:
   - \`customer_is_business = FALSE\` — excludes SMB (Remitly Business) data. Only use TRUE if user asks about SMB/business customers. Omit only if user asks about "all customers" or "total".
   - \`txn_is_core = TRUE\` — includes only core remittance transactions (excludes Rewire and other non-core). Omit only if the user explicitly asks about all transaction types, Rewire, or non-core transactions.
 - FORECAST TABLES: For monthly forecast data, always use \`fpa.fpa_fcst_latest\`. For daily forecast allocations, always use \`fpa.fpa_fcst_latest_daily_ma\`. Do not use other forecast tables unless the user explicitly names one.
+- PAYMENT METHOD / PAY-IN TYPE: The ONLY way to get payment method is by joining \`lakehouse.public.payment_profile_dimension\` using \`payment_profile_key = transaction_payment_profile_key\`. The column for pay-in type is \`payment_instrument_type\`. Do NOT use \`payment_route_dimension\` — it does not contain payment method names.
 - If you're unsure about a column's meaning, state your assumption
 - If the question is vague or ambiguous (e.g. "products", "return rate" with no clear column mapping), do NOT guess. Instead, skip the SQL block entirely and ask the user clarifying questions. Explain what specific terms could mean given the available tables, and ask the user to pick. Only generate SQL when you can confidently map the question to specific columns.
 - Output the SQL in a \`\`\`sql code block, followed by a brief explanation
@@ -317,12 +318,12 @@ export async function generateSQL(
   const domain = getDomainContext();
   const systemPrompt =
     getSQLSystemPrompt() +
-    (domain ? `\n\n${domain}` : '') +
     metricContext +
     queryContext +
     githubQueryContext +
     '\n\nAvailable tables and their schemas:\n' +
-    tableContext;
+    tableContext +
+    (domain ? `\n\n--- CRITICAL DOMAIN RULES (override any assumptions) ---\n${domain}` : '');
 
   const messages: Anthropic.MessageParam[] = [
     ...buildHistoryMessages(history),
@@ -387,9 +388,9 @@ export async function fixSQL(
   const domain = getDomainContext();
   const systemPrompt =
     getSQLSystemPrompt() +
-    (domain ? `\n\n${domain}` : '') +
     '\n\nAvailable tables and their schemas:\n' +
-    tableContext;
+    tableContext +
+    (domain ? `\n\n--- CRITICAL DOMAIN RULES (override any assumptions) ---\n${domain}` : '');
 
   const client = getClient();
   const stream = client.messages.stream({
@@ -404,7 +405,7 @@ export async function fixSQL(
       },
       {
         role: 'user',
-        content: `The query returned an error:\n${error}\n\nPlease fix the SQL and explain the correction.`,
+        content: `The query returned an error:\n${error}\n\nPlease fix the SQL. Pay close attention to the CRITICAL DOMAIN RULES above — they specify which tables and columns to use for specific concepts like payment method.`,
       },
     ],
   });
@@ -522,13 +523,13 @@ export async function generateRevisedSQL(
   const domain = getDomainContext();
   const systemPrompt =
     getSQLSystemPrompt() +
-    (domain ? `\n\n${domain}` : '') +
     metricContext +
     queryContext +
     githubQueryContext +
     '\n\nAvailable tables and their schemas:\n' +
     tableContext +
-    unusedTableContext;
+    unusedTableContext +
+    (domain ? `\n\n--- CRITICAL DOMAIN RULES (override any assumptions) ---\n${domain}` : '');
 
   const fixMessage = [
     `The query executed successfully but the results don't adequately answer the question.`,
@@ -566,15 +567,17 @@ export interface SQLReviewResult {
 const SQL_REVIEW_SYSTEM_PROMPT = `You are a SQL reviewer for a Trino-based data lakehouse. Your job is to catch logical errors in SQL queries BEFORE they are executed.
 
 Review the query for these common mistakes:
-1. **Join fan-out / many-to-many**: JOINs on non-unique keys that multiply rows (e.g. joining two fact tables on day_of_quarter creates a cross product). This is the most critical issue — look for it first.
-2. **Wrong date ranges**: Query asks about "this quarter" but filters include multiple quarters, or compares the wrong periods.
-3. **Incorrect aggregation**: GROUP BY is missing columns, or aggregating over a dimension that should be filtered.
-4. **Wrong table qualifiers**: The catalog must always be "lakehouse" (e.g. lakehouse.fpa.table, NOT fpa.analytics.table).
-5. **Ambiguous column references**: Columns used in JOINs or WHERE that could belong to multiple tables but aren't qualified.
-6. **Logic errors**: Conditions that contradict each other, OR/AND precedence issues, comparing incompatible types.
-7. **Missing core remittance filters**: If the query uses a table that has \`customer_is_business\` or \`txn_is_core\` columns but is missing these default filters, flag as an issue and add them in correctedSQL:
+1. **Column existence**: Cross-check EVERY column reference in SELECT, WHERE, JOIN, GROUP BY, and ORDER BY against the "Available tables" schema below. If a column does not exist in the referenced table, flag it immediately and fix in correctedSQL. This is the highest-priority check.
+2. **Join fan-out / many-to-many**: JOINs on non-unique keys that multiply rows (e.g. joining two fact tables on day_of_quarter creates a cross product). This is the most critical logic issue — look for it first.
+3. **Wrong date ranges**: Query asks about "this quarter" but filters include multiple quarters, or compares the wrong periods.
+4. **Incorrect aggregation**: GROUP BY is missing columns, or aggregating over a dimension that should be filtered.
+5. **Wrong table qualifiers**: The catalog must always be "lakehouse" (e.g. lakehouse.fpa.table, NOT fpa.analytics.table).
+6. **Ambiguous column references**: Columns used in JOINs or WHERE that could belong to multiple tables but aren't qualified.
+7. **Logic errors**: Conditions that contradict each other, OR/AND precedence issues, comparing incompatible types.
+8. **Missing core remittance filters**: If the query uses a table that has \`customer_is_business\` or \`txn_is_core\` columns but is missing these default filters, flag as an issue and add them in correctedSQL:
    - \`customer_is_business = FALSE\` (skip only if user asks about SMB or all customers)
    - \`txn_is_core = TRUE\` (skip only if user asks about all transaction types, Rewire, or non-core)
+9. **Domain rule violations**: The "CRITICAL DOMAIN RULES" section below contains mandatory table/column mappings for specific business concepts (e.g. payment method, forecast data). If the SQL uses a DIFFERENT table or column than what the domain rules specify, flag it and fix in correctedSQL using the correct table/column from the domain rules. Domain rules always take precedence over table name guessing.
 
 Respond with ONLY a valid JSON object, no other text:
 {"approved": true, "issues": [], "correctedSQL": null}
@@ -606,7 +609,7 @@ Available tables:
 ${tableContext}`;
 
   const domain = getDomainContext();
-  const systemPrompt = SQL_REVIEW_SYSTEM_PROMPT + (domain ? `\n\n${domain}` : '');
+  const systemPrompt = SQL_REVIEW_SYSTEM_PROMPT + (domain ? `\n\n--- CRITICAL DOMAIN RULES (override any assumptions) ---\n${domain}` : '');
 
   const client = getClient();
   const response = await client.messages.create({

@@ -459,3 +459,39 @@ export function getSchemaTree(): Record<string, Record<string, string[]>> {
 export function getPrioritySchemaNames(): string[] {
   return getPriorityConfig().prioritySchemas;
 }
+
+/**
+ * Load columns on-demand for tables that were matched by findRelevantTables
+ * but whose columns haven't been loaded yet (non-priority schemas still in Phase 2).
+ * Mutates the cache in-place so subsequent calls see the columns.
+ */
+export async function ensureColumnsLoaded(tables: TableMetadata[]): Promise<TableMetadata[]> {
+  const schemasToLoad = new Set<string>();
+  for (const t of tables) {
+    if (t.columns.length === 0) {
+      schemasToLoad.add(`${t.catalog}.${t.schema}`);
+    }
+  }
+  if (schemasToLoad.size === 0) return tables;
+
+  const cache = getCache();
+  if (!cache) return tables;
+
+  for (const key of schemasToLoad) {
+    const [catalog, schema] = key.split('.');
+    console.log(`[metadata] On-demand column load for ${catalog}.${schema}`);
+    await loadSchemaColumns(catalog, schema, cache.catalogs, cache.schemas, cache.tables);
+  }
+
+  // Re-fetch from updated cache
+  const updated = getCache();
+  if (!updated) return tables;
+
+  return tables.map((t) => {
+    if (t.columns.length > 0) return t;
+    const fresh = updated.tables.find(
+      (u) => u.catalog === t.catalog && u.schema === t.schema && u.table === t.table
+    );
+    return fresh || t;
+  });
+}

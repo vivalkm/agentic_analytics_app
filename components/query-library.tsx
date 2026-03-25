@@ -6,12 +6,12 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import {
-  Play,
   Search,
   FileCode,
   Code2,
   ChevronRight,
   Loader2,
+  RefreshCw,
 } from 'lucide-react';
 
 interface QueryEntry {
@@ -28,23 +28,36 @@ interface QueryLibraryProps {
 export function QueryLibrary({ onUseQuery }: QueryLibraryProps) {
   const [queries, setQueries] = useState<QueryEntry[]>([]);
   const [loading, setLoading] = useState(true);
+  const [syncing, setSyncing] = useState(false);
   const [search, setSearch] = useState('');
   const fetched = useRef(false);
+  const abortRef = useRef<AbortController | null>(null);
 
-  useEffect(() => {
-    if (fetched.current) return;
-    fetched.current = true;
+  const fetchLibrary = () => {
+    abortRef.current?.abort();
     const controller = new AbortController();
+    abortRef.current = controller;
     fetch('/api/library', { signal: controller.signal })
       .then((res) => res.json())
       .then((data) => setQueries(data.queries || []))
       .catch((e) => {
         if (e instanceof DOMException && e.name === 'AbortError') return;
       })
-      .finally(() => setLoading(false));
-    return () => { controller.abort(); };
+      .finally(() => { setLoading(false); setSyncing(false); });
+  };
+
+  useEffect(() => {
+    if (fetched.current) return;
+    fetched.current = true;
+    fetchLibrary();
+    return () => { abortRef.current?.abort(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const handleSync = () => {
+    setSyncing(true);
+    fetchLibrary();
+  };
 
   const filtered = useMemo(() => {
     if (!search.trim()) return queries;
@@ -74,11 +87,23 @@ export function QueryLibrary({ onUseQuery }: QueryLibraryProps) {
   return (
     <div className="p-3 space-y-3">
       {/* Header */}
-      <div className="flex items-center gap-2">
-        <span className="text-sm font-medium text-sidebar-foreground">Query Library</span>
-        <Badge variant="secondary" className="text-xs px-1.5 py-0">
-          {queries.length}
-        </Badge>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-medium text-sidebar-foreground">Query Library</span>
+          <Badge variant="secondary" className="text-xs px-1.5 py-0">
+            {queries.length}
+          </Badge>
+        </div>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-6 w-6"
+          onClick={handleSync}
+          disabled={syncing}
+          title="Reload from disk"
+        >
+          <RefreshCw className={`h-3 w-3 ${syncing ? 'animate-spin' : ''}`} />
+        </Button>
       </div>
 
       {/* Search */}

@@ -10,7 +10,7 @@ import {
   checkDateCompleteness,
   parseChartConfigFromAnalysis,
 } from './anthropic';
-import { findRelevantTables, ensureMetadataLoading, waitForRefresh, waitForPrioritySchemas, getMetadataCache, triggerBackgroundRefresh } from './metadata';
+import { findRelevantTables, ensureMetadataLoading, waitForRefresh, waitForPrioritySchemas, getMetadataCache, triggerBackgroundRefresh, ensureColumnsLoaded } from './metadata';
 import { matchQueries, loadQueryLibrary, getQueryLibrary } from './query-matcher';
 import { matchMetrics, ensureMetricsLoading } from './metric-catalog';
 import { matchGitHubQueries, ensureGitHubQueriesLoading } from './github-queries';
@@ -277,6 +277,13 @@ export function runAgentLoop(question: string, history?: ConversationTurn[], att
               return;
             }
           }
+        }
+
+        // Ensure columns are loaded for all matched tables (non-priority schemas
+        // may only have table names listed but no columns yet during Phase 2)
+        if (relevantTables.some((t) => t.columns.length === 0)) {
+          emit(controller, { type: 'progress', content: 'Loading column metadata for matched tables...' });
+          relevantTables = await ensureColumnsLoaded(relevantTables);
         }
 
         let currentSQL = '';
