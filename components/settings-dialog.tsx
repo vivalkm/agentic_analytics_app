@@ -41,7 +41,7 @@ export function SettingsDialog({
 }) {
   const [settings, setSettings] = useState<SettingValue[]>([]);
   const [edits, setEdits] = useState<Record<string, string>>({});
-  const [revealedKeys, setRevealedKeys] = useState<Set<string>>(new Set());
+  const [revealedValues, setRevealedValues] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -53,7 +53,7 @@ export function SettingsDialog({
       const data = await res.json();
       setSettings(data.settings || []);
       setEdits({});
-      setRevealedKeys(new Set());
+      setRevealedValues({});
       setSaved(false);
     } finally {
       setLoading(false);
@@ -97,20 +97,33 @@ export function SettingsDialog({
   const getDisplayValue = (setting: SettingValue): string => {
     // If user has edited this field, show their edit
     if (edits[setting.key] !== undefined) return edits[setting.key];
-    // For secrets, show masked unless revealed
-    if (setting.secret && setting.hasValue && !revealedKeys.has(setting.key)) {
-      return setting.value; // already masked from server
+    // For secrets, show full value if revealed, masked otherwise
+    if (setting.secret && setting.hasValue) {
+      return revealedValues[setting.key] ?? setting.value; // revealed full value or masked from server
     }
-    return setting.secret ? '' : setting.value;
+    return setting.value;
   };
 
-  const toggleReveal = (key: string) => {
-    setRevealedKeys((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
+  const isRevealed = (key: string) => key in revealedValues;
+
+  const toggleReveal = async (key: string) => {
+    if (isRevealed(key)) {
+      setRevealedValues((prev) => {
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      });
+    } else {
+      try {
+        const res = await fetch(`/api/settings?reveal=${encodeURIComponent(key)}`);
+        const data = await res.json();
+        if (data.value !== undefined) {
+          setRevealedValues((prev) => ({ ...prev, [key]: data.value }));
+        }
+      } catch {
+        // silently fail — keep masked
+      }
+    }
   };
 
   // Group settings
@@ -155,7 +168,7 @@ export function SettingsDialog({
                       </label>
                       <div className="relative">
                         <Input
-                          type={setting.secret && !revealedKeys.has(setting.key) ? 'password' : 'text'}
+                          type={setting.secret && !isRevealed(setting.key) ? 'password' : 'text'}
                           placeholder={setting.placeholder}
                           value={getDisplayValue(setting)}
                           onChange={(e) =>
@@ -169,7 +182,7 @@ export function SettingsDialog({
                             onClick={() => toggleReveal(setting.key)}
                             className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                           >
-                            {revealedKeys.has(setting.key) ? (
+                            {isRevealed(setting.key) ? (
                               <EyeOff className="h-4 w-4" />
                             ) : (
                               <Eye className="h-4 w-4" />

@@ -1,6 +1,18 @@
 import { getAllSettings, writeEnvLocal, MANAGED_KEYS, getEnv } from '@/lib/env-config';
 
-export async function GET() {
+export async function GET(request: Request) {
+  const { searchParams } = new URL(request.url);
+  const revealKey = searchParams.get('reveal');
+
+  if (revealKey) {
+    const mk = MANAGED_KEYS.find((k) => k.key === revealKey && k.secret);
+    if (!mk) {
+      return Response.json({ error: 'Invalid key' }, { status: 400 });
+    }
+    const raw = getEnv(revealKey) || '';
+    return Response.json({ key: revealKey, value: raw });
+  }
+
   return Response.json({ settings: getAllSettings() });
 }
 
