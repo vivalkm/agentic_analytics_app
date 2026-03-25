@@ -36,6 +36,7 @@ interface TableInfo {
 interface MetadataResponse {
   tree: Record<string, Record<string, string[]>>;
   tables: TableInfo[];
+  prioritySchemas: string[];
   lastRefreshed: string | null;
   isRefreshing: boolean;
   tableCount: number;
@@ -62,6 +63,7 @@ export function SchemaExplorer({ onInsertTable, refreshKey }: SchemaExplorerProp
   const [search, setSearch] = useState('');
   const [copiedFqn, setCopiedFqn] = useState<string | null>(null);
   const fetchInFlight = useRef(false);
+  const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const fetchMetadata = useCallback(async () => {
     if (fetchInFlight.current) return null;
@@ -81,6 +83,31 @@ export function SchemaExplorer({ onInsertTable, refreshKey }: SchemaExplorerProp
     }
     return null;
   }, []);
+
+  // Polling: when isRefreshing is true, poll every 2s for progressive updates
+  useEffect(() => {
+    if (data?.isRefreshing) {
+      // Start polling
+      if (!pollTimer.current) {
+        pollTimer.current = setInterval(() => {
+          fetchMetadata();
+        }, 2000);
+      }
+    } else {
+      // Stop polling
+      if (pollTimer.current) {
+        clearInterval(pollTimer.current);
+        pollTimer.current = null;
+      }
+    }
+
+    return () => {
+      if (pollTimer.current) {
+        clearInterval(pollTimer.current);
+        pollTimer.current = null;
+      }
+    };
+  }, [data?.isRefreshing, fetchMetadata]);
 
   // Initial fetch
   useEffect(() => {
@@ -108,9 +135,8 @@ export function SchemaExplorer({ onInsertTable, refreshKey }: SchemaExplorerProp
       await fetchMetadata();
     } catch {
       // silently fail
-    } finally {
-      setRefreshing(false);
     }
+    // Don't setRefreshing(false) here — polling will clear it when isRefreshing goes false
   };
 
   const columnMap = useMemo(() => {
@@ -120,6 +146,11 @@ export function SchemaExplorer({ onInsertTable, refreshKey }: SchemaExplorerProp
     }
     return map;
   }, [data?.tables]);
+
+  const prioritySet = useMemo(
+    () => new Set((data?.prioritySchemas ?? []).map((s) => s.toLowerCase())),
+    [data?.prioritySchemas]
+  );
 
   const filteredTree = useMemo(() => {
     if (!data?.tree) return {};
@@ -132,7 +163,8 @@ export function SchemaExplorer({ onInsertTable, refreshKey }: SchemaExplorerProp
         const filtered = tables.filter(
           (t) => t.toLowerCase().includes(q) || schema.toLowerCase().includes(q)
         );
-        if (filtered.length > 0) {
+        // Also show the schema if the schema name matches, even with no table matches
+        if (filtered.length > 0 || schema.toLowerCase().includes(q)) {
           if (!result[catalog]) result[catalog] = {};
           result[catalog][schema] = filtered;
         }
@@ -193,7 +225,14 @@ export function SchemaExplorer({ onInsertTable, refreshKey }: SchemaExplorerProp
       {/* Last refreshed */}
       {data?.lastRefreshed && (
         <p className="text-xs text-muted-foreground/70">
-          Synced with Trino at {new Date(data.lastRefreshed).toLocaleDateString()} {new Date(data.lastRefreshed).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+          {data.isRefreshing ? (
+            <span className="flex items-center gap-1">
+              <Loader2 className="h-3 w-3 animate-spin" />
+              Syncing... {data.tableCount} tables loaded
+            </span>
+          ) : (
+            <>Synced with Trino at {new Date(data.lastRefreshed).toLocaleDateString()} {new Date(data.lastRefreshed).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</>
+          )}
         </p>
       )}
 
@@ -225,6 +264,8 @@ export function SchemaExplorer({ onInsertTable, refreshKey }: SchemaExplorerProp
               onTableClick={handleTableClick}
               forceOpen={isFiltered}
               defaultOpen={catalogEntries.length === 1}
+              prioritySchemas={prioritySet}
+              isRefreshing={data?.isRefreshing ?? false}
             />
           ))}
         </div>
@@ -241,6 +282,8 @@ function CatalogNode({
   onTableClick,
   forceOpen,
   defaultOpen,
+  prioritySchemas,
+  isRefreshing,
 }: {
   catalog: string;
   schemas: Record<string, string[]>;
@@ -249,6 +292,8 @@ function CatalogNode({
   onTableClick: (fqn: string) => void;
   forceOpen: boolean;
   defaultOpen: boolean;
+  prioritySchemas: Set<string>;
+  isRefreshing: boolean;
 }) {
   const schemaEntries = Object.entries(schemas);
   const controlled = forceOpen ? { open: true } : {};
@@ -271,6 +316,8 @@ function CatalogNode({
             copiedFqn={copiedFqn}
             onTableClick={onTableClick}
             forceOpen={forceOpen}
+            isPriority={prioritySchemas.has(schema.toLowerCase())}
+            isRefreshing={isRefreshing}
           />
         ))}
       </Collapsible.Panel>
@@ -286,6 +333,8 @@ function SchemaNode({
   copiedFqn,
   onTableClick,
   forceOpen,
+  isPriority,
+  isRefreshing,
 }: {
   catalog: string;
   schema: string;
@@ -294,35 +343,55 @@ function SchemaNode({
   copiedFqn: string | null;
   onTableClick: (fqn: string) => void;
   forceOpen: boolean;
+  isPriority: boolean;
+  isRefreshing: boolean;
 }) {
   const controlled = forceOpen ? { open: true } : {};
+  const isEmpty = tables.length === 0;
 
   return (
-    <Collapsible.Root {...controlled}>
+    <Collapsible.Root defaultOpen={isPriority} {...controlled}>
       <Collapsible.Trigger className="flex w-full items-center gap-1.5 rounded px-1.5 py-1 text-sm hover:bg-sidebar-accent group">
         <ChevronRight className="h-3.5 w-3.5 text-muted-foreground transition-transform group-data-[open]:rotate-90" />
         <Folder className="h-3.5 w-3.5 text-muted-foreground group-data-[open]:hidden" />
         <FolderOpen className="h-3.5 w-3.5 text-muted-foreground hidden group-data-[open]:block" />
         <span className="truncate">{schema}</span>
-        <Badge variant="secondary" className="ml-auto text-xs px-1 py-0">
-          {tables.length}
-        </Badge>
+        <span className="ml-auto flex items-center gap-1">
+          {isEmpty && isRefreshing ? (
+            <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
+          ) : (
+            <Badge variant="secondary" className="text-xs px-1 py-0">
+              {tables.length}
+            </Badge>
+          )}
+        </span>
       </Collapsible.Trigger>
       <Collapsible.Panel className="pl-3">
-        {tables.map((table) => {
-          const fqn = `${catalog}.${schema}.${table}`;
-          return (
-            <TableNode
-              key={table}
-              fqn={fqn}
-              table={table}
-              columns={columnMap.get(fqn) || []}
-              isCopied={copiedFqn === fqn}
-              onTableClick={onTableClick}
-              forceOpen={forceOpen}
-            />
-          );
-        })}
+        {isEmpty && isRefreshing ? (
+          <div className="px-1.5 py-1 text-xs text-muted-foreground flex items-center gap-1">
+            <Loader2 className="h-3 w-3 animate-spin" />
+            Loading tables...
+          </div>
+        ) : isEmpty ? (
+          <div className="px-1.5 py-1 text-xs text-muted-foreground">
+            No tables
+          </div>
+        ) : (
+          tables.map((table) => {
+            const fqn = `${catalog}.${schema}.${table}`;
+            return (
+              <TableNode
+                key={table}
+                fqn={fqn}
+                table={table}
+                columns={columnMap.get(fqn) || []}
+                isCopied={copiedFqn === fqn}
+                onTableClick={onTableClick}
+                forceOpen={forceOpen}
+              />
+            );
+          })
+        )}
       </Collapsible.Panel>
     </Collapsible.Root>
   );

@@ -392,6 +392,38 @@ export async function getTableComments(
 }
 
 /**
+ * Bulk-fetch all columns for every table in a schema using a single SQL query.
+ * Much faster than calling describeTable per table (1 round-trip vs N).
+ * Returns a map of tableName → columns[].
+ */
+export async function describeSchemaColumns(
+  catalog: string,
+  schema: string,
+): Promise<Map<string, { name: string; type: string; comment?: string }[]>> {
+  const mcpClient = getClient();
+  const result = await mcpClient.callTool('query_trino', {
+    sql: `SELECT table_name, column_name, data_type, comment FROM ${catalog}.information_schema.columns WHERE table_schema = '${schema}' ORDER BY table_name, ordinal_position`,
+    environment: ENV(),
+    limit: 50000,
+  });
+  const parsed = parseMCPResult(result);
+  const map = new Map<string, { name: string; type: string; comment?: string }[]>();
+  for (const row of parsed.rows) {
+    const tableName = String(row['table_name'] ?? '');
+    if (!tableName) continue;
+    if (!map.has(tableName)) map.set(tableName, []);
+    const rawComment = row['comment'];
+    const comment = rawComment && String(rawComment).trim() ? String(rawComment).trim() : undefined;
+    map.get(tableName)!.push({
+      name: String(row['column_name'] ?? ''),
+      type: String(row['data_type'] ?? 'unknown'),
+      comment,
+    });
+  }
+  return map;
+}
+
+/**
  * Route SHOW/DESCRIBE SQL to dedicated MCP metadata tools.
  * Returns null if the SQL is not a metadata command.
  */

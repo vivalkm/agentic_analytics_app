@@ -1,0 +1,14 @@
+services:
+  app:
+    build: .
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env.local
+    volumes:
+      # Persist metadata cache across restarts
+      - cache-data:/app/.cache
+    restart: unless-stopped
+
+volumes:
+  cache-data:

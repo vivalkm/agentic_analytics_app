@@ -1,6 +1,6 @@
 # Lakehouse Analytics
 
-A analytics app for interactive data exploration. Ask questions in natural language, get SQL generated and executed against Trino, then receive AI-powered analysis with charts.
+An analytics app for interactive data exploration. Ask questions in natural language, get SQL generated and executed against Trino, then receive AI-powered analysis with charts.
 
 ## How It Works
 
@@ -27,43 +27,38 @@ The agent loop retries up to 3 times, automatically fixing SQL errors and valida
 
 ### Prerequisites
 
-- Node.js 18+
-- Access to a Trino cluster via [trino-mcp](https://github.com/Remitly/toolbox/tree/main/trino)
-- Anthropic API key (direct or via LLM gateway)
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/)
+- An Anthropic API key (direct or via LLM gateway)
 
 ### Setup
 
-1. Clone the repository and install dependencies:
+1. Clone the repository:
    ```bash
-   npm install
+   git clone https://github.com/vivalkm/agentic_analytics_app.git
+   cd agentic_analytics_app
    ```
 
-2. Create `.env.local` with your configuration:
+2. Create your environment file:
+   ```bash
+   cp .env.local.example .env.local
+   ```
+
+3. Edit `.env.local` and add your Anthropic API key:
    ```env
-   # Required
    ANTHROPIC_API_KEY=your-api-key
-   ANTHROPIC_BASE_URL=https://api.anthropic.com
-
-   # Trino configuration
-   TRINO_ENVIRONMENT=prod
-   TRINO_DEFAULT_CATALOG=lakehouse
-   TRINO_PRIORITY_SCHEMAS=fpa
-
-   # Optional: Statsig metric catalog
-   STATSIG_CONSOLE_API_KEY=your-statsig-key
-   STATSIG_METRIC_TEAMS=squad-FPA,squad-INTA
-
-   # Optional: Shared query library from GitHub
-   QUERY_LIBRARY_REPO=https://github.com/org/repo/tree/main/path/to/sql
-   GITHUB_TOKEN=your-github-token
    ```
+   All other settings (Trino, Statsig, GitHub) are pre-configured with defaults.
 
-3. Start the dev server:
+4. Start the app:
    ```bash
-   npm run dev
+   docker compose up --build
    ```
 
-4. Open [http://localhost:3000](http://localhost:3000)
+5. Open [http://localhost:3000](http://localhost:3000)
+
+On subsequent runs, just `docker compose up` (no `--build` needed unless code changes).
+
+To stop: `docker compose down`
 
 ## Project Structure
 

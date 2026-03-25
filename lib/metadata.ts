@@ -1,7 +1,7 @@
 import { writeFileSync, readFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { TableMetadata, MetadataCache } from './types';
-import { listSchemas, listTables, describeTable, getTableComments } from './trino-mcp';
+import { listSchemas, listTables, describeTable, describeSchemaColumns, getTableComments } from './trino-mcp';
 
 // --- Disk persistence ---
 const CACHE_DIR = join(process.cwd(), '.cache');
@@ -151,10 +151,53 @@ export function ensureMetadataLoading(): void {
 }
 
 /**
- * Introspect tables for a single schema and add them to the tables array.
- * Updates metadataCache progressively after each table.
+ * Phase 1: List table names for a schema and add them (with no columns) to the tables array.
+ * This is fast — just one MCP call — so table names appear in the sidebar quickly.
  */
-async function introspectSchema(
+async function listSchemaTableNames(
+  catalog: string,
+  schema: string,
+  catalogs: string[],
+  allSchemas: Record<string, string[]>,
+  tables: TableMetadata[]
+): Promise<string[]> {
+  try {
+    const [tableNames, tableComments] = await Promise.all([
+      listTables(schema),
+      getTableComments(catalog, schema).catch(() => new Map<string, string>()),
+    ]);
+
+    for (const tableName of tableNames) {
+      tables.push({
+        catalog,
+        schema,
+        table: tableName,
+        columns: [],
+        comment: tableComments.get(tableName),
+        lastRefreshed: new Date().toISOString(),
+      });
+    }
+
+    // Update cache so sidebar sees table names immediately
+    metadataCache = {
+      catalogs,
+      schemas: allSchemas,
+      tables: [...tables],
+      lastRefreshed: new Date().toISOString(),
+    };
+    syncToGlobal();
+    return tableNames;
+  } catch (e) {
+    console.error(`[metadata] Failed to list tables for ${catalog}.${schema}:`, e);
+    return [];
+  }
+}
+
+/**
+ * Phase 2: Bulk-fetch columns for all tables in a schema using a single SQL query.
+ * Updates the existing table entries in-place with column data.
+ */
+async function loadSchemaColumns(
   catalog: string,
   schema: string,
   catalogs: string[],
@@ -162,39 +205,16 @@ async function introspectSchema(
   tables: TableMetadata[]
 ): Promise<void> {
   try {
-    // Use dedicated MCP tools instead of query_trino SQL
-    const [tableNames, tableComments] = await Promise.all([
-      listTables(schema),
-      getTableComments(catalog, schema).catch(() => new Map<string, string>()),
-    ]);
+    const columnMap = await describeSchemaColumns(catalog, schema);
 
-    // Describe each table to get columns (with column comments)
-    for (const tableName of tableNames) {
-      try {
-        const columns = await describeTable(tableName, schema);
-        tables.push({
-          catalog,
-          schema,
-          table: tableName,
-          columns,
-          comment: tableComments.get(tableName),
-          lastRefreshed: new Date().toISOString(),
-        });
-      } catch (e) {
-        // If describe fails for a single table, still include it with no columns
-        console.error(`[metadata] Failed to describe ${catalog}.${schema}.${tableName}:`, e);
-        tables.push({
-          catalog,
-          schema,
-          table: tableName,
-          columns: [],
-          comment: tableComments.get(tableName),
-          lastRefreshed: new Date().toISOString(),
-        });
+    // Update existing table entries with columns
+    for (const t of tables) {
+      if (t.catalog === catalog && t.schema === schema && t.columns.length === 0) {
+        const cols = columnMap.get(t.table);
+        if (cols) t.columns = cols;
       }
     }
 
-    // Update cache progressively
     metadataCache = {
       catalogs,
       schemas: allSchemas,
@@ -203,7 +223,7 @@ async function introspectSchema(
     };
     syncToGlobal();
   } catch (e) {
-    console.error(`[metadata] Failed to introspect ${catalog}.${schema}:`, e);
+    console.error(`[metadata] Failed to load columns for ${catalog}.${schema}:`, e);
   }
 }
 
@@ -266,12 +286,13 @@ async function refreshMetadata(): Promise<void> {
         config.prioritySchemas.indexOf(b.toLowerCase())
     );
 
-    // Load priority schemas first
+    // --- Priority schemas: full load (table names + columns) ---
     if (priority.length > 0) {
       console.log(`[metadata] Loading priority schemas: [${priority.join(', ')}]`);
     }
     for (const schema of priority) {
-      await introspectSchema(catalog, schema, catalogs, schemas, tables);
+      await listSchemaTableNames(catalog, schema, catalogs, schemas, tables);
+      await loadSchemaColumns(catalog, schema, catalogs, schemas, tables);
     }
 
     if (priority.length > 0) {
@@ -288,9 +309,16 @@ async function refreshMetadata(): Promise<void> {
       if (metadataCache) saveCacheToDisk(metadataCache);
     }
 
-    // Then load remaining schemas
+    // --- Remaining schemas: Phase 1 — list all table names first (fast) ---
+    console.log(`[metadata] Phase 1: listing table names for ${remaining.length} schemas...`);
     for (const schema of remaining) {
-      await introspectSchema(catalog, schema, catalogs, schemas, tables);
+      await listSchemaTableNames(catalog, schema, catalogs, schemas, tables);
+    }
+    console.log(`[metadata] Phase 1 done: ${tables.length} tables listed. Phase 2: loading columns...`);
+
+    // --- Remaining schemas: Phase 2 — bulk-load columns per schema ---
+    for (const schema of remaining) {
+      await loadSchemaColumns(catalog, schema, catalogs, schemas, tables);
     }
   }
 
@@ -365,12 +393,55 @@ export function getAllTables(): TableMetadata[] {
 export function getSchemaTree(): Record<string, Record<string, string[]>> {
   if (!metadataCache) return {};
 
+  const config = getPriorityConfig();
+  const skipSchemas = config.skipSchemas;
+
   const tree: Record<string, Record<string, string[]>> = {};
+
+  // First, seed the tree with all known schemas (even those with no tables yet)
+  // so they render as empty expandable nodes during progressive loading
+  for (const [catalog, schemaList] of Object.entries(metadataCache.schemas || {})) {
+    if (!tree[catalog]) tree[catalog] = {};
+    for (const schema of schemaList) {
+      if (skipSchemas.has(schema.toLowerCase())) continue;
+      if (!tree[catalog][schema]) tree[catalog][schema] = [];
+    }
+  }
+
+  // Then populate with actual tables
   for (const table of metadataCache.tables) {
     if (!tree[table.catalog]) tree[table.catalog] = {};
     if (!tree[table.catalog][table.schema])
       tree[table.catalog][table.schema] = [];
     tree[table.catalog][table.schema].push(table.table);
   }
+
+  // Reorder schemas within each catalog: priority schemas first
+  for (const catalog of Object.keys(tree)) {
+    const schemas = tree[catalog];
+    const ordered: Record<string, string[]> = {};
+
+    // Priority schemas first (in configured order)
+    for (const ps of config.prioritySchemas) {
+      for (const schema of Object.keys(schemas)) {
+        if (schema.toLowerCase() === ps) {
+          ordered[schema] = schemas[schema];
+        }
+      }
+    }
+    // Then remaining schemas alphabetically
+    for (const schema of Object.keys(schemas).sort()) {
+      if (!ordered[schema]) {
+        ordered[schema] = schemas[schema];
+      }
+    }
+
+    tree[catalog] = ordered;
+  }
+
   return tree;
+}
+
+export function getPrioritySchemaNames(): string[] {
+  return getPriorityConfig().prioritySchemas;
 }
