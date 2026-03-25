@@ -64,20 +64,24 @@ export function SchemaExplorer({ onInsertTable, refreshKey }: SchemaExplorerProp
   const [copiedFqn, setCopiedFqn] = useState<string | null>(null);
   const fetchInFlight = useRef(false);
   const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   const fetchMetadata = useCallback(async () => {
     if (fetchInFlight.current) return null;
     fetchInFlight.current = true;
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
     try {
-      const res = await fetch('/api/metadata');
+      const res = await fetch('/api/metadata', { signal: controller.signal });
       if (res.ok) {
         const json: MetadataResponse = await res.json();
         setData(json);
         if (!json.isRefreshing) setRefreshing(false);
         return json;
       }
-    } catch {
-      // silently fail
+    } catch (e) {
+      if (e instanceof DOMException && e.name === 'AbortError') return null;
     } finally {
       fetchInFlight.current = false;
     }
@@ -109,9 +113,10 @@ export function SchemaExplorer({ onInsertTable, refreshKey }: SchemaExplorerProp
     };
   }, [data?.isRefreshing, fetchMetadata]);
 
-  // Initial fetch
+  // Initial fetch + cleanup
   useEffect(() => {
     fetchMetadata().finally(() => setLoading(false));
+    return () => { abortRef.current?.abort(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -139,13 +144,17 @@ export function SchemaExplorer({ onInsertTable, refreshKey }: SchemaExplorerProp
     // Don't setRefreshing(false) here — polling will clear it when isRefreshing goes false
   };
 
+  // Stabilize dependency: use tableCount as proxy instead of tables array ref
+  // (which changes on every poll response even if contents are identical)
+  const tableCount = data?.tables?.length ?? 0;
   const columnMap = useMemo(() => {
     const map = new Map<string, ColumnInfo[]>();
     for (const t of data?.tables ?? []) {
       map.set(`${t.catalog}.${t.schema}.${t.table}`, t.columns);
     }
     return map;
-  }, [data?.tables]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tableCount]);
 
   const prioritySet = useMemo(
     () => new Set((data?.prioritySchemas ?? []).map((s) => s.toLowerCase())),

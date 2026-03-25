@@ -34,11 +34,16 @@ export function QueryLibrary({ onUseQuery }: QueryLibraryProps) {
   useEffect(() => {
     if (fetched.current) return;
     fetched.current = true;
-    fetch('/api/library')
+    const controller = new AbortController();
+    fetch('/api/library', { signal: controller.signal })
       .then((res) => res.json())
       .then((data) => setQueries(data.queries || []))
-      .catch(() => {})
+      .catch((e) => {
+        if (e instanceof DOMException && e.name === 'AbortError') return;
+      })
       .finally(() => setLoading(false));
+    return () => { controller.abort(); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const filtered = useMemo(() => {

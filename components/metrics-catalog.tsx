@@ -45,16 +45,22 @@ export function MetricsCatalog() {
   const [lastSynced, setLastSynced] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const fetched = useRef(false);
+  const abortRef = useRef<AbortController | null>(null);
 
   const fetchMetrics = () => {
-    fetch('/api/metrics')
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+    fetch('/api/metrics', { signal: controller.signal })
       .then((res) => res.json())
       .then((data) => {
         setMetrics(data.metrics || []);
         setLastSynced(data.lastSynced || null);
         setSyncing(data.isSyncing || false);
       })
-      .catch(() => {})
+      .catch((e) => {
+        if (e instanceof DOMException && e.name === 'AbortError') return;
+      })
       .finally(() => setLoading(false));
   };
 
@@ -62,6 +68,8 @@ export function MetricsCatalog() {
     if (fetched.current) return;
     fetched.current = true;
     fetchMetrics();
+    return () => { abortRef.current?.abort(); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleSync = async () => {
@@ -157,9 +165,7 @@ export function MetricsCatalog() {
             No metrics synced yet.
           </p>
           <p className="mt-1 text-xs text-muted-foreground/70">
-            {process.env.NEXT_PUBLIC_STATSIG_CONFIGURED
-              ? 'Click the sync button to fetch metrics from Statsig.'
-              : 'Set STATSIG_CONSOLE_API_KEY in .env.local to enable.'}
+            Set STATSIG_CONSOLE_API_KEY in Settings, then click sync.
           </p>
           <Button
             variant="outline"

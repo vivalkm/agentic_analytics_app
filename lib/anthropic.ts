@@ -4,28 +4,58 @@ import { join } from 'path';
 import { TableMetadata, QueryResult, QueryLibraryEntry, MetricEntry, ValidationResult, ConversationTurn, Attachment } from './types';
 import { getEnv } from './env-config';
 
-/** Load domain context file (cached after first read). */
-let _domainContext: string | null = null;
+/** Load domain context file (cached via globalThis for HMR safety). */
+const _DC_KEY = '__domain_context__';
 function getDomainContext(): string {
-  if (_domainContext !== null) return _domainContext;
+  const g = globalThis as unknown as Record<string, string>;
+  if (g[_DC_KEY] !== undefined) return g[_DC_KEY];
   try {
-    _domainContext = readFileSync(
+    g[_DC_KEY] = readFileSync(
       join(process.cwd(), 'domain-context.md'),
       'utf-8'
     ).trim();
   } catch {
-    _domainContext = '';
+    g[_DC_KEY] = '';
   }
-  return _domainContext;
+  return g[_DC_KEY];
 }
 
-const getClient = () =>
-  new Anthropic({
-    apiKey: getEnv('ANTHROPIC_API_KEY'),
-    baseURL: getEnv('ANTHROPIC_BASE_URL') || undefined,
-  });
+const getClient = (() => {
+  const key = '__anthropic_client__';
+  return () => {
+    const g = globalThis as unknown as Record<string, Anthropic>;
+    if (!g[key]) {
+      g[key] = new Anthropic({
+        apiKey: getEnv('ANTHROPIC_API_KEY'),
+        baseURL: getEnv('ANTHROPIC_BASE_URL') || undefined,
+      });
+    }
+    return g[key];
+  };
+})();
 
 const getModel = () => getEnv('ANTHROPIC_MODEL') || 'claude-sonnet-4-20250514';
+
+/** Wrap an Anthropic MessageStream in a ReadableStream with proper cancel support. */
+function streamToReadable(stream: ReturnType<Anthropic['messages']['stream']>): ReadableStream {
+  return new ReadableStream({
+    async start(controller) {
+      const encoder = new TextEncoder();
+      for await (const event of stream) {
+        if (
+          event.type === 'content_block_delta' &&
+          event.delta.type === 'text_delta'
+        ) {
+          controller.enqueue(encoder.encode(event.delta.text));
+        }
+      }
+      controller.close();
+    },
+    cancel() {
+      stream.abort();
+    },
+  });
+}
 
 function getSQLSystemPrompt() {
   return `You are a SQL analyst for a Trino-based data lakehouse. You write precise, efficient Trino SQL.
@@ -307,20 +337,7 @@ export async function generateSQL(
     messages,
   });
 
-  return new ReadableStream({
-    async start(controller) {
-      const encoder = new TextEncoder();
-      for await (const event of stream) {
-        if (
-          event.type === 'content_block_delta' &&
-          event.delta.type === 'text_delta'
-        ) {
-          controller.enqueue(encoder.encode(event.delta.text));
-        }
-      }
-      controller.close();
-    },
-  });
+  return streamToReadable(stream);
 }
 
 export async function analyzeResults(
@@ -357,20 +374,7 @@ Column names and types: ${results.columns.map((c, i) => `${c} (${results.columnT
     messages,
   });
 
-  return new ReadableStream({
-    async start(controller) {
-      const encoder = new TextEncoder();
-      for await (const event of stream) {
-        if (
-          event.type === 'content_block_delta' &&
-          event.delta.type === 'text_delta'
-        ) {
-          controller.enqueue(encoder.encode(event.delta.text));
-        }
-      }
-      controller.close();
-    },
-  });
+  return streamToReadable(stream);
 }
 
 export async function fixSQL(
@@ -405,20 +409,7 @@ export async function fixSQL(
     ],
   });
 
-  return new ReadableStream({
-    async start(controller) {
-      const encoder = new TextEncoder();
-      for await (const event of stream) {
-        if (
-          event.type === 'content_block_delta' &&
-          event.delta.type === 'text_delta'
-        ) {
-          controller.enqueue(encoder.encode(event.delta.text));
-        }
-      }
-      controller.close();
-    },
-  });
+  return streamToReadable(stream);
 }
 
 /**
@@ -478,11 +469,12 @@ ${JSON.stringify(sampleRows, null, 2)}${tablesList}`;
         suggestion: parsed.suggestion ? String(parsed.suggestion) : undefined,
       };
     }
-  } catch {
-    // If parsing fails, assume valid to avoid blocking
+  } catch (e) {
+    console.warn('[anthropic] validateResults JSON parse failed:', e);
   }
 
-  return { valid: true, reason: 'Validation could not parse response, assuming valid.' };
+  // Fail closed — trigger retry rather than accepting potentially bad results
+  return { valid: false, reason: 'Validation response could not be parsed. Re-checking.' };
 }
 
 /**
@@ -562,20 +554,7 @@ export async function generateRevisedSQL(
     ],
   });
 
-  return new ReadableStream({
-    async start(controller) {
-      const encoder = new TextEncoder();
-      for await (const event of stream) {
-        if (
-          event.type === 'content_block_delta' &&
-          event.delta.type === 'text_delta'
-        ) {
-          controller.enqueue(encoder.encode(event.delta.text));
-        }
-      }
-      controller.close();
-    },
-  });
+  return streamToReadable(stream);
 }
 
 export interface SQLReviewResult {
@@ -659,11 +638,12 @@ ${tableContext}`;
         correctedSQL,
       };
     }
-  } catch {
-    // Parse failure — approve to avoid blocking
+  } catch (e) {
+    console.warn('[anthropic] reviewSQL JSON parse failed:', e);
   }
 
-  return { approved: true, issues: [] };
+  // Fail closed — trigger review retry rather than approving bad SQL
+  return { approved: false, issues: ['SQL review response could not be parsed. Re-checking.'] };
 }
 
 /**

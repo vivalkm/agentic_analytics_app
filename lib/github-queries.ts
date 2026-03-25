@@ -1,6 +1,7 @@
 import { writeFileSync, readFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { QueryLibraryEntry } from './types';
+import { extractKeywords } from './stop-words';
 
 // --- Config ---
 
@@ -333,13 +334,7 @@ export function matchGitHubQueries(
   if (entries.length === 0) return [];
 
   const questionLower = question.toLowerCase();
-  const stopWords = new Set([
-    'the', 'and', 'for', 'from', 'with', 'that', 'this',
-    'what', 'how', 'show', 'give', 'tell', 'about',
-  ]);
-  const keywords = questionLower
-    .split(/\s+/)
-    .filter((w) => w.length > 2 && !stopWords.has(w));
+  const keywords = extractKeywords(questionLower);
 
   if (keywords.length === 0) return [];
 

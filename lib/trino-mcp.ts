@@ -1,6 +1,14 @@
 import { QueryResult } from './types';
 import { spawn, ChildProcess } from 'child_process';
 
+/** Validate a SQL identifier (catalog/schema/table name) to prevent injection */
+const IDENT_RE = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
+function assertIdentifier(value: string, label: string): void {
+  if (!IDENT_RE.test(value)) {
+    throw new Error(`Invalid ${label}: "${value}" — must be a simple identifier`);
+  }
+}
+
 /**
  * MCP Client that spawns trino-mcp as a subprocess and communicates via stdio JSON-RPC.
  */
@@ -14,10 +22,29 @@ class TrinoMCPClient {
   private nextId = 1;
   private initialized = false;
   private initPromise: Promise<void> | null = null;
+  private consecutiveFailures = 0;
+  private lastFailureTime = 0;
 
   async ensureStarted(): Promise<void> {
     if (this.initialized && this.process && !this.process.killed) return;
-    if (this.initPromise) return this.initPromise;
+    if (this.initPromise) {
+      await this.initPromise;
+      // Re-check: process may have died while we were waiting
+      if (this.initialized && this.process && !this.process.killed) return;
+      // Process died — fall through to restart
+      this.initPromise = null;
+    }
+
+    // Exponential backoff: 1s, 2s, 4s, 8s, 16s, max 30s
+    if (this.consecutiveFailures > 0) {
+      const backoffMs = Math.min(1000 * Math.pow(2, this.consecutiveFailures - 1), 30000);
+      const elapsed = Date.now() - this.lastFailureTime;
+      if (elapsed < backoffMs) {
+        const waitMs = backoffMs - elapsed;
+        console.log(`[trino-mcp] Backoff: waiting ${Math.round(waitMs / 1000)}s before reconnect (failure #${this.consecutiveFailures})`);
+        await new Promise((r) => setTimeout(r, waitMs));
+      }
+    }
 
     this.initPromise = this._start();
     return this.initPromise;
@@ -58,6 +85,8 @@ class TrinoMCPClient {
         console.error('[trino-mcp] Process error:', err);
         this.initialized = false;
         this.initPromise = null;
+        this.consecutiveFailures++;
+        this.lastFailureTime = Date.now();
         reject(err);
       });
 
@@ -66,6 +95,8 @@ class TrinoMCPClient {
         this.initialized = false;
         this.initPromise = null;
         this.process = null;
+        this.consecutiveFailures++;
+        this.lastFailureTime = Date.now();
         // Reject all pending requests
         for (const [, req] of this.pendingRequests) {
           req.reject(new Error(`MCP process exited with code ${code}`));
@@ -80,6 +111,7 @@ class TrinoMCPClient {
           // Send initialized notification
           this._sendNotification('notifications/initialized', {});
           this.initialized = true;
+          this.consecutiveFailures = 0;
           clearTimeout(timeout);
           resolve();
         },
@@ -373,6 +405,8 @@ export async function getTableComments(
   catalog: string,
   schema: string,
 ): Promise<Map<string, string>> {
+  assertIdentifier(catalog, 'catalog');
+  assertIdentifier(schema, 'schema');
   const mcpClient = getClient();
   const result = await mcpClient.callTool('query_trino', {
     sql: `SELECT table_name, comment FROM system.metadata.table_comments WHERE catalog_name = '${catalog}' AND schema_name = '${schema}'`,
@@ -400,6 +434,8 @@ export async function describeSchemaColumns(
   catalog: string,
   schema: string,
 ): Promise<Map<string, { name: string; type: string; comment?: string }[]>> {
+  assertIdentifier(catalog, 'catalog');
+  assertIdentifier(schema, 'schema');
   const mcpClient = getClient();
   const result = await mcpClient.callTool('query_trino', {
     sql: `SELECT table_name, column_name, data_type, comment FROM ${catalog}.information_schema.columns WHERE table_schema = '${schema}' ORDER BY table_name, ordinal_position`,

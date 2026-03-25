@@ -8,6 +8,9 @@ export async function POST(request: Request) {
     if (!sql || typeof sql !== 'string') {
       return Response.json({ error: 'SQL query is required' }, { status: 400 });
     }
+    if (sql.length > 50_000) {
+      return Response.json({ error: 'SQL query too long (max 50,000 characters)' }, { status: 400 });
+    }
 
     // Read-only enforcement
     const validation = validateSQL(sql);

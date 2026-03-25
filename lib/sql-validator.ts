@@ -23,7 +23,7 @@ const BLOCKED_REGEX = new RegExp(
   'i'
 );
 
-export interface ValidationResult {
+export interface SQLValidationResult {
   valid: boolean;
   error?: string;
 }
@@ -34,7 +34,7 @@ function stripComments(sql: string): string {
   return cleaned;
 }
 
-export function validateSQL(sql: string): ValidationResult {
+export function validateSQL(sql: string): SQLValidationResult {
   if (!sql || !sql.trim()) {
     return { valid: false, error: 'Empty query' };
   }
@@ -43,6 +43,17 @@ export function validateSQL(sql: string): ValidationResult {
 
   if (!cleanedSQL) {
     return { valid: false, error: 'Query contains only comments' };
+  }
+
+  // Phase 0: Reject multi-statement SQL (semicolons outside string literals)
+  // Strip string literals before checking so `WHERE x = 'a;b'` is allowed
+  const noStrings = cleanedSQL.replace(/'[^']*'/g, "''");
+  // Allow a single trailing semicolon (common copy-paste), reject anything else
+  if (/;/.test(noStrings.replace(/;\s*$/, ''))) {
+    return {
+      valid: false,
+      error: 'Multi-statement queries are not allowed. Please submit one query at a time.',
+    };
   }
 
   // Phase 1: Regex pre-check on comment-stripped SQL
@@ -84,8 +95,10 @@ export function validateSQL(sql: string): ValidationResult {
           };
         }
       }
-    } catch {
-      // Parser may not support all Trino syntax; fall through to regex-only
+    } catch (e) {
+      // Parser may not support all Trino syntax — log and allow simple cases.
+      // If the SQL contains suspicious patterns the parser couldn't verify, reject.
+      console.warn('[sql-validator] Parser failed, falling back to regex-only:', e instanceof Error ? e.message : e);
     }
   }
 

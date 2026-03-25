@@ -3,6 +3,7 @@ import { getEnv } from './env-config';
 
 const STATSIG_BASE_URL = 'https://statsigapi.net';
 const MAX_PER_PAGE = 100;
+const MAX_PAGES = 50; // Safety guard against infinite pagination loops
 
 /** Team filter for metric sources. Comma-separated, case-insensitive. Re-evaluated each call so settings changes take effect. */
 function getMetricTeamFilter(): Set<string> {
@@ -67,7 +68,7 @@ export async function fetchMetricSources(): Promise<MetricSource[]> {
   let page = 1;
   let totalItems = Infinity;
 
-  while (allSources.length < totalItems) {
+  while (allSources.length < totalItems && page <= MAX_PAGES) {
     const path = `/console/v1/metrics/metric_source/list?limit=${MAX_PER_PAGE}&page=${page}`;
     const response = (await statsigFetch(path)) as MetricSourceListResponse;
 
@@ -135,7 +136,7 @@ export async function fetchDerivedMetrics(): Promise<DerivedMetric[]> {
   let page = 1;
   let totalItems = Infinity;
 
-  while (allMetrics.length < totalItems) {
+  while (allMetrics.length < totalItems && page <= MAX_PAGES) {
     const path = `/console/v1/metrics/list?limit=${MAX_PER_PAGE}&page=${page}`;
     const response = (await statsigFetch(path)) as MetricCatalogListResponse;
 
@@ -220,9 +221,11 @@ export async function fetchAllMetrics(): Promise<MetricEntry[]> {
       })
     );
 
-    for (const result of results) {
+    for (const [idx, result] of results.entries()) {
       if (result.status === 'fulfilled') {
         entries.push(result.value);
+      } else {
+        console.warn(`[statsig] Failed to fetch metric source "${batch[idx]?.name}":`, result.reason);
       }
     }
   }
@@ -271,9 +274,11 @@ export async function fetchAllMetrics(): Promise<MetricEntry[]> {
       })
     );
 
-    for (const result of results) {
+    for (const [idx, result] of results.entries()) {
       if (result.status === 'fulfilled') {
         entries.push(result.value);
+      } else {
+        console.warn(`[statsig] Failed to fetch derived metric "${batch[idx]?.name}":`, result.reason);
       }
     }
   }

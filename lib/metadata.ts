@@ -1,11 +1,13 @@
-import { writeFileSync, readFileSync, mkdirSync } from 'fs';
+import { writeFileSync, readFileSync, mkdirSync, renameSync } from 'fs';
 import { join } from 'path';
 import { TableMetadata, MetadataCache } from './types';
 import { listSchemas, listTables, describeTable, describeSchemaColumns, getTableComments } from './trino-mcp';
+import { extractKeywords } from './stop-words';
 
 // --- Disk persistence ---
 const CACHE_DIR = join(process.cwd(), '.cache');
 const CACHE_FILE = join(CACHE_DIR, 'metadata.json');
+const STALE_THRESHOLD_MS = 24 * 60 * 60 * 1000; // 24 hours
 
 function loadCacheFromDisk(): MetadataCache | null {
   try {
@@ -24,34 +26,40 @@ function loadCacheFromDisk(): MetadataCache | null {
 function saveCacheToDisk(cache: MetadataCache): void {
   try {
     mkdirSync(CACHE_DIR, { recursive: true });
-    writeFileSync(CACHE_FILE, JSON.stringify(cache), 'utf-8');
+    const tmp = CACHE_FILE + '.tmp';
+    writeFileSync(tmp, JSON.stringify(cache), 'utf-8');
+    renameSync(tmp, CACHE_FILE);
   } catch (e) {
     console.error('[metadata] Failed to write disk cache:', e);
   }
 }
 
-// --- In-memory state (globalThis survives hot reloads, disk survives restarts) ---
-const g = globalThis as typeof globalThis & {
+// --- In-memory state via globalThis (survives HMR — no local copies that desync) ---
+interface MetadataGlobals {
   __metadataCache?: MetadataCache | null;
   __metadataRefreshInProgress?: boolean;
   __metadataRefreshPromise?: Promise<void> | null;
   __metadataPriorityResolve?: (() => void) | null;
   __metadataPriorityPromise?: Promise<void> | null;
-};
-
-let metadataCache: MetadataCache | null = g.__metadataCache ?? loadCacheFromDisk();
-let refreshInProgress = g.__metadataRefreshInProgress ?? false;
-let refreshPromise: Promise<void> | null = g.__metadataRefreshPromise ?? null;
-let priorityResolve: (() => void) | null = g.__metadataPriorityResolve ?? null;
-let priorityPromise: Promise<void> | null = g.__metadataPriorityPromise ?? null;
-
-function syncToGlobal() {
-  g.__metadataCache = metadataCache;
-  g.__metadataRefreshInProgress = refreshInProgress;
-  g.__metadataRefreshPromise = refreshPromise;
-  g.__metadataPriorityResolve = priorityResolve;
-  g.__metadataPriorityPromise = priorityPromise;
 }
+const g = globalThis as typeof globalThis & MetadataGlobals;
+
+// Initialize from disk on first load only
+if (g.__metadataCache === undefined) {
+  g.__metadataCache = loadCacheFromDisk();
+}
+
+// Accessor helpers — all state lives in globalThis, no local `let` copies
+function getCache(): MetadataCache | null { return g.__metadataCache ?? null; }
+function setCache(c: MetadataCache | null) { g.__metadataCache = c; }
+function getRefreshPromise(): Promise<void> | null { return g.__metadataRefreshPromise ?? null; }
+function setRefreshPromise(p: Promise<void> | null) { g.__metadataRefreshPromise = p; }
+function getPriorityResolve(): (() => void) | null { return g.__metadataPriorityResolve ?? null; }
+function setPriorityResolve(r: (() => void) | null) { g.__metadataPriorityResolve = r; }
+function getPriorityPromise(): Promise<void> | null { return g.__metadataPriorityPromise ?? null; }
+function setPriorityPromise(p: Promise<void> | null) { g.__metadataPriorityPromise = p; }
+function isRefreshInProgress(): boolean { return g.__metadataRefreshInProgress ?? false; }
+function setRefreshInProgress(v: boolean) { g.__metadataRefreshInProgress = v; }
 
 /**
  * Read priority config from env vars.
@@ -84,17 +92,14 @@ function getPriorityConfig() {
 }
 
 export function getMetadataCache(): MetadataCache | null {
-  return metadataCache;
+  return getCache();
 }
 
 export function setMetadataCache(cache: MetadataCache): void {
-  metadataCache = cache;
-  syncToGlobal();
+  setCache(cache);
 }
 
-export function isRefreshing(): boolean {
-  return refreshInProgress;
-}
+export { isRefreshInProgress as isRefreshing };
 
 /**
  * Trigger a background metadata refresh. Non-blocking — returns immediately.
@@ -102,52 +107,65 @@ export function isRefreshing(): boolean {
  * Loads priority schemas first, then remaining schemas.
  */
 export function triggerBackgroundRefresh(force = false): void {
-  if (refreshInProgress) return;
+  // Use refreshPromise as the lock — set synchronously before any await
+  if (getRefreshPromise()) return;
 
+  const cache = getCache();
   // Only refresh when forced (user clicked Refresh) or cache has no tables
-  if (!force && metadataCache && metadataCache.tables.length > 0) return;
+  if (!force && cache && cache.tables.length > 0) return;
 
-  refreshInProgress = true;
+  setRefreshInProgress(true);
 
   // Create a promise that resolves when priority schemas are loaded
-  priorityPromise = new Promise<void>((resolve) => {
-    priorityResolve = resolve;
-  });
+  setPriorityPromise(new Promise<void>((resolve) => {
+    setPriorityResolve(resolve);
+  }));
 
-  refreshPromise = refreshMetadata()
+  setRefreshPromise(refreshMetadata()
     .catch((err) => console.error('[metadata] Background refresh failed:', err))
     .finally(() => {
-      refreshInProgress = false;
-      refreshPromise = null;
-      if (priorityResolve) {
-        priorityResolve();
-        priorityResolve = null;
+      setRefreshInProgress(false);
+      setRefreshPromise(null);
+      const pr = getPriorityResolve();
+      if (pr) {
+        pr();
+        setPriorityResolve(null);
       }
-      priorityPromise = null;
-      syncToGlobal();
-    });
-
-  syncToGlobal();
+      setPriorityPromise(null);
+    }));
 }
 
 export async function waitForRefresh(): Promise<void> {
-  if (refreshPromise) await refreshPromise;
+  const p = getRefreshPromise();
+  if (p) await p;
 }
 
 /**
  * Wait only until priority schemas (e.g. fpa) are loaded — much faster than waitForRefresh.
  */
 export async function waitForPrioritySchemas(): Promise<void> {
-  if (priorityPromise) await priorityPromise;
+  const p = getPriorityPromise();
+  if (p) await p;
 }
 
 /**
  * Ensure metadata is loading. If not yet started, kicks off background refresh.
+ * Also triggers a background refresh if the cache is stale (>24h old).
  * Returns immediately — does NOT block.
  */
 export function ensureMetadataLoading(): void {
-  if (metadataCache || refreshInProgress) return;
-  triggerBackgroundRefresh();
+  if (getRefreshPromise()) return; // already refreshing
+  const cache = getCache();
+  if (!cache) {
+    triggerBackgroundRefresh();
+    return;
+  }
+  // Check staleness — if cache is older than threshold, refresh in background
+  const age = Date.now() - new Date(cache.lastRefreshed).getTime();
+  if (age > STALE_THRESHOLD_MS) {
+    console.log(`[metadata] Cache is ${Math.round(age / 3600000)}h old — triggering background refresh`);
+    triggerBackgroundRefresh(true);
+  }
 }
 
 /**
@@ -179,13 +197,12 @@ async function listSchemaTableNames(
     }
 
     // Update cache so sidebar sees table names immediately
-    metadataCache = {
+    setCache({
       catalogs,
       schemas: allSchemas,
       tables: [...tables],
       lastRefreshed: new Date().toISOString(),
-    };
-    syncToGlobal();
+    });
     return tableNames;
   } catch (e) {
     console.error(`[metadata] Failed to list tables for ${catalog}.${schema}:`, e);
@@ -207,21 +224,24 @@ async function loadSchemaColumns(
   try {
     const columnMap = await describeSchemaColumns(catalog, schema);
 
-    // Update existing table entries with columns
-    for (const t of tables) {
+    // Build a new tables array with columns merged (avoid mutating shared references)
+    const updatedTables = tables.map((t) => {
       if (t.catalog === catalog && t.schema === schema && t.columns.length === 0) {
         const cols = columnMap.get(t.table);
-        if (cols) t.columns = cols;
+        if (cols) return { ...t, columns: cols };
       }
-    }
+      return t;
+    });
+    // Replace the shared reference so future phases use the updated entries
+    tables.length = 0;
+    tables.push(...updatedTables);
 
-    metadataCache = {
+    setCache({
       catalogs,
       schemas: allSchemas,
-      tables: [...tables],
+      tables: [...updatedTables],
       lastRefreshed: new Date().toISOString(),
-    };
-    syncToGlobal();
+    });
   } catch (e) {
     console.error(`[metadata] Failed to load columns for ${catalog}.${schema}:`, e);
   }
@@ -244,9 +264,8 @@ async function refreshMetadata(): Promise<void> {
   catalogs.push(config.defaultCatalog);
 
   // Preserve existing tables while refreshing so progress/sidebar don't flash empty
-  const existingTables = metadataCache?.tables || [];
-  metadataCache = { catalogs, schemas: {}, tables: existingTables, lastRefreshed: new Date().toISOString() };
-  syncToGlobal();
+  const existingTables = getCache()?.tables || [];
+  setCache({ catalogs, schemas: {}, tables: existingTables, lastRefreshed: new Date().toISOString() });
   console.log(`[metadata] Introspecting catalog: ${config.defaultCatalog}`);
 
   // Step 2: List schemas for the target catalog using dedicated MCP tool
@@ -258,8 +277,7 @@ async function refreshMetadata(): Promise<void> {
     }
   }
 
-  metadataCache = { catalogs, schemas, tables: existingTables, lastRefreshed: new Date().toISOString() };
-  syncToGlobal();
+  setCache({ catalogs, schemas, tables: existingTables, lastRefreshed: new Date().toISOString() });
   const totalSchemas = Object.values(schemas).reduce((s, arr) => s + arr.length, 0);
   console.log(`[metadata] Found ${totalSchemas} schemas`);
 
@@ -302,11 +320,12 @@ async function refreshMetadata(): Promise<void> {
     }
 
     // Signal that priority schemas are ready — callers using waitForPrioritySchemas() unblock here
-    if (priorityResolve) {
-      priorityResolve();
-      priorityResolve = null;
-      syncToGlobal();
-      if (metadataCache) saveCacheToDisk(metadataCache);
+    const pr = getPriorityResolve();
+    if (pr) {
+      pr();
+      setPriorityResolve(null);
+      const c = getCache();
+      if (c) saveCacheToDisk(c);
     }
 
     // --- Remaining schemas: Phase 1 — list all table names first (fast) ---
@@ -323,28 +342,22 @@ async function refreshMetadata(): Promise<void> {
   }
 
   console.log(`[metadata] Refresh complete: ${tables.length} tables loaded`);
-  if (metadataCache) saveCacheToDisk(metadataCache);
+  const finalCache = getCache();
+  if (finalCache) saveCacheToDisk(finalCache);
 }
 
 export function findRelevantTables(
   question: string,
   maxTables: number = 10
 ): TableMetadata[] {
-  if (!metadataCache) return [];
+  const cache = getCache();
+  if (!cache) return [];
 
   const config = getPriorityConfig();
   const questionLower = question.toLowerCase();
-  const stopWords = new Set([
-    'the', 'and', 'for', 'from', 'with', 'that', 'this',
-    'what', 'show', 'how', 'many', 'all', 'are', 'was',
-    'were', 'been', 'have', 'has', 'had', 'will', 'would',
-    'could', 'should', 'may', 'can', 'its', 'our', 'their',
-  ]);
-  const keywords = questionLower
-    .split(/\s+/)
-    .filter((w) => w.length > 2 && !stopWords.has(w));
+  const keywords = extractKeywords(questionLower);
 
-  const scored = metadataCache.tables.map((table) => {
+  const scored = cache.tables.map((table) => {
     let score = 0;
     const tableName = table.table.toLowerCase();
     const schemaName = table.schema.toLowerCase();
@@ -387,11 +400,12 @@ export function findRelevantTables(
 }
 
 export function getAllTables(): TableMetadata[] {
-  return metadataCache?.tables || [];
+  return getCache()?.tables || [];
 }
 
 export function getSchemaTree(): Record<string, Record<string, string[]>> {
-  if (!metadataCache) return {};
+  const cache = getCache();
+  if (!cache) return {};
 
   const config = getPriorityConfig();
   const skipSchemas = config.skipSchemas;
@@ -400,7 +414,7 @@ export function getSchemaTree(): Record<string, Record<string, string[]>> {
 
   // First, seed the tree with all known schemas (even those with no tables yet)
   // so they render as empty expandable nodes during progressive loading
-  for (const [catalog, schemaList] of Object.entries(metadataCache.schemas || {})) {
+  for (const [catalog, schemaList] of Object.entries(cache.schemas || {})) {
     if (!tree[catalog]) tree[catalog] = {};
     for (const schema of schemaList) {
       if (skipSchemas.has(schema.toLowerCase())) continue;
@@ -409,7 +423,7 @@ export function getSchemaTree(): Record<string, Record<string, string[]>> {
   }
 
   // Then populate with actual tables
-  for (const table of metadataCache.tables) {
+  for (const table of cache.tables) {
     if (!tree[table.catalog]) tree[table.catalog] = {};
     if (!tree[table.catalog][table.schema])
       tree[table.catalog][table.schema] = [];

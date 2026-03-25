@@ -34,6 +34,17 @@ const COLORS = [
   'hsl(330, 81%, 60%)',  // pink
 ];
 
+// Theme-aware colors via CSS custom properties (set by Tailwind's oklch tokens).
+// These resolve at render time so they adapt to light/dark mode automatically.
+const GRID_STROKE = 'var(--color-border)';
+const AXIS_TICK_FILL = 'var(--color-muted-foreground)';
+const TOOLTIP_BG = 'var(--color-popover)';
+const TOOLTIP_BORDER = 'var(--color-border)';
+const TOOLTIP_TEXT = 'var(--color-popover-foreground)';
+const TOOLTIP_LABEL = 'var(--color-muted-foreground)';
+const LEGEND_COLOR = 'var(--color-muted-foreground)';
+const LABEL_LINE_STROKE = 'var(--color-muted-foreground)';
+
 function formatValue(value: unknown): string {
   if (value === null || value === undefined) return '';
   const num = Number(value);
@@ -165,21 +176,21 @@ export function ChartRenderer({ config, results }: ChartRendererProps) {
 
   // Rotated tick props for date x-axes to avoid label crowding
   const xTickProps: Record<string, unknown> = isDateAxis
-    ? { fontSize: 11, fill: 'hsl(0, 0%, 55%)', angle: -45, textAnchor: 'end', dy: 8 }
-    : { fontSize: 11, fill: 'hsl(0, 0%, 55%)' };
+    ? { fontSize: 11, fill: AXIS_TICK_FILL, angle: -45, textAnchor: 'end', dy: 8 }
+    : { fontSize: 11, fill: AXIS_TICK_FILL };
 
   // Extra bottom margin for rotated labels
   const bottomMargin = isDateAxis ? 50 : 5;
 
   const commonTooltipStyle = {
     contentStyle: {
-      backgroundColor: 'hsl(240, 10%, 12%)',
-      border: '1px solid hsl(240, 6%, 20%)',
+      backgroundColor: TOOLTIP_BG,
+      border: `1px solid ${TOOLTIP_BORDER}`,
       borderRadius: '8px',
       fontSize: '12px',
-      color: 'hsl(0, 0%, 90%)',
+      color: TOOLTIP_TEXT,
     },
-    labelStyle: { color: 'hsl(0, 0%, 65%)' },
+    labelStyle: { color: TOOLTIP_LABEL },
   };
 
   const showLegend = isGrouped || config.yKeys.length > 1;
@@ -194,12 +205,12 @@ export function ChartRenderer({ config, results }: ChartRendererProps) {
       <ResponsiveContainer width="100%" height={300}>
         {config.type === 'bar' ? (
           <BarChart data={chartData} margin={{ top: 5, right: dualAxis ? 10 : 10, left: 10, bottom: bottomMargin }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="hsl(240, 6%, 20%)" />
+            <CartesianGrid strokeDasharray="3 3" stroke={GRID_STROKE} />
             <XAxis
               dataKey={config.xKey}
               tickFormatter={formatXLabel}
               tick={xTickProps}
-              axisLine={{ stroke: 'hsl(240, 6%, 20%)' }}
+              axisLine={{ stroke: GRID_STROKE }}
               tickLine={false}
               height={isDateAxis ? 70 : 30}
             />
@@ -226,7 +237,7 @@ export function ChartRenderer({ config, results }: ChartRendererProps) {
             ) : (
               <YAxis
                 tickFormatter={formatValue}
-                tick={{ fontSize: 11, fill: 'hsl(0, 0%, 55%)' }}
+                tick={{ fontSize: 11, fill: AXIS_TICK_FILL }}
                 axisLine={false}
                 tickLine={false}
                 width={60}
@@ -239,7 +250,7 @@ export function ChartRenderer({ config, results }: ChartRendererProps) {
             />
             {showLegend && (
               <Legend
-                wrapperStyle={{ fontSize: '11px', color: 'hsl(0, 0%, 65%)' }}
+                wrapperStyle={{ fontSize: '11px', color: LEGEND_COLOR }}
               />
             )}
             {isGrouped
@@ -266,12 +277,12 @@ export function ChartRenderer({ config, results }: ChartRendererProps) {
           </BarChart>
         ) : config.type === 'line' ? (
           <LineChart data={chartData} margin={{ top: 5, right: dualAxis ? 10 : 10, left: 10, bottom: bottomMargin }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="hsl(240, 6%, 20%)" />
+            <CartesianGrid strokeDasharray="3 3" stroke={GRID_STROKE} />
             <XAxis
               dataKey={config.xKey}
               tickFormatter={formatXLabel}
               tick={xTickProps}
-              axisLine={{ stroke: 'hsl(240, 6%, 20%)' }}
+              axisLine={{ stroke: GRID_STROKE }}
               tickLine={false}
               height={isDateAxis ? 70 : 30}
             />
@@ -298,7 +309,7 @@ export function ChartRenderer({ config, results }: ChartRendererProps) {
             ) : (
               <YAxis
                 tickFormatter={formatValue}
-                tick={{ fontSize: 11, fill: 'hsl(0, 0%, 55%)' }}
+                tick={{ fontSize: 11, fill: AXIS_TICK_FILL }}
                 axisLine={false}
                 tickLine={false}
                 width={60}
@@ -311,7 +322,7 @@ export function ChartRenderer({ config, results }: ChartRendererProps) {
             />
             {config.yKeys.length > 1 && (
               <Legend
-                wrapperStyle={{ fontSize: '11px', color: 'hsl(0, 0%, 65%)' }}
+                wrapperStyle={{ fontSize: '11px', color: LEGEND_COLOR }}
               />
             )}
             {config.yKeys.map((key, i) => (
@@ -341,7 +352,7 @@ export function ChartRenderer({ config, results }: ChartRendererProps) {
               label={({ name, percent }) =>
                 `${formatXLabel(name)} ${((percent ?? 0) * 100).toFixed(0)}%`
               }
-              labelLine={{ stroke: 'hsl(0, 0%, 45%)' }}
+              labelLine={{ stroke: LABEL_LINE_STROKE }}
             >
               {chartData.map((_, i) => (
                 <Cell key={i} fill={COLORS[i % COLORS.length]} />

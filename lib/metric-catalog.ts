@@ -1,7 +1,8 @@
-import { writeFileSync, readFileSync, mkdirSync } from 'fs';
+import { writeFileSync, readFileSync, mkdirSync, renameSync } from 'fs';
 import { join } from 'path';
 import { MetricEntry, MetricCatalogCache } from './types';
 import { fetchAllMetrics } from './statsig';
+import { extractKeywords } from './stop-words';
 
 // --- Disk persistence ---
 const CACHE_DIR = join(process.cwd(), '.cache');
@@ -28,46 +29,51 @@ function loadCacheFromDisk(): MetricCatalogCache | null {
 function saveCacheToDisk(cache: MetricCatalogCache): void {
   try {
     mkdirSync(CACHE_DIR, { recursive: true });
-    writeFileSync(CACHE_FILE, JSON.stringify(cache), 'utf-8');
+    const tmp = CACHE_FILE + '.tmp';
+    writeFileSync(tmp, JSON.stringify(cache), 'utf-8');
+    renameSync(tmp, CACHE_FILE);
   } catch (e) {
     console.error('[metrics] Failed to write disk cache:', e);
   }
 }
 
-// --- In-memory state (globalThis survives hot reloads) ---
-const g = globalThis as typeof globalThis & {
+// --- In-memory state via globalThis (survives HMR — no local copies that desync) ---
+interface MetricGlobals {
   __metricCache?: MetricCatalogCache | null;
   __metricSyncInProgress?: boolean;
   __metricSyncPromise?: Promise<void> | null;
-};
-
-let metricCache: MetricCatalogCache | null = g.__metricCache ?? loadCacheFromDisk();
-let syncInProgress = g.__metricSyncInProgress ?? false;
-let syncPromise: Promise<void> | null = g.__metricSyncPromise ?? null;
-
-function syncToGlobal() {
-  g.__metricCache = metricCache;
-  g.__metricSyncInProgress = syncInProgress;
-  g.__metricSyncPromise = syncPromise;
 }
+const g = globalThis as typeof globalThis & MetricGlobals;
+
+if (g.__metricCache === undefined) {
+  g.__metricCache = loadCacheFromDisk();
+}
+
+function getMCache(): MetricCatalogCache | null { return g.__metricCache ?? null; }
+function setMCache(c: MetricCatalogCache | null) { g.__metricCache = c; }
+function getSyncPromise(): Promise<void> | null { return g.__metricSyncPromise ?? null; }
+function setSyncPromise(p: Promise<void> | null) { g.__metricSyncPromise = p; }
+function isSyncInProgress(): boolean { return g.__metricSyncInProgress ?? false; }
+function setSyncInProgress(v: boolean) { g.__metricSyncInProgress = v; }
 
 // --- Public API ---
 
 export function getMetricCatalog(): MetricEntry[] {
-  return metricCache?.metrics ?? [];
+  return getMCache()?.metrics ?? [];
 }
 
 export function getLastSynced(): string | null {
-  return metricCache?.lastSynced ?? null;
+  return getMCache()?.lastSynced ?? null;
 }
 
 export function isMetricSyncing(): boolean {
-  return syncInProgress;
+  return isSyncInProgress();
 }
 
 function isCacheStale(): boolean {
-  if (!metricCache?.lastSynced) return true;
-  const age = Date.now() - new Date(metricCache.lastSynced).getTime();
+  const cache = getMCache();
+  if (!cache?.lastSynced) return true;
+  const age = Date.now() - new Date(cache.lastSynced).getTime();
   return age > STALE_THRESHOLD_MS;
 }
 
@@ -76,7 +82,8 @@ function isCacheStale(): boolean {
  * If force=false, skips sync if cache is fresh (< 24h).
  */
 export function triggerMetricSync(force = false): Promise<void> {
-  if (syncInProgress && syncPromise) return syncPromise;
+  const existing = getSyncPromise();
+  if (isSyncInProgress() && existing) return existing;
   if (!force && !isCacheStale()) return Promise.resolve();
 
   if (!process.env.STATSIG_CONSOLE_API_KEY) {
@@ -84,37 +91,36 @@ export function triggerMetricSync(force = false): Promise<void> {
     return Promise.resolve();
   }
 
-  syncInProgress = true;
-  syncToGlobal();
+  setSyncInProgress(true);
 
-  syncPromise = (async () => {
+  const promise = (async () => {
     try {
       console.log('[metrics] Syncing metrics from Statsig...');
       const metrics = await fetchAllMetrics();
-      metricCache = {
+      const cache: MetricCatalogCache = {
         metrics,
         lastSynced: new Date().toISOString(),
       };
-      saveCacheToDisk(metricCache);
+      setMCache(cache);
+      saveCacheToDisk(cache);
       console.log(`[metrics] Synced ${metrics.length} metrics`);
     } catch (e) {
       console.error('[metrics] Sync failed:', e);
     } finally {
-      syncInProgress = false;
-      syncPromise = null;
-      syncToGlobal();
+      setSyncInProgress(false);
+      setSyncPromise(null);
     }
   })();
 
-  syncToGlobal();
-  return syncPromise;
+  setSyncPromise(promise);
+  return promise;
 }
 
 /**
  * Ensure metrics are loaded. Uses cache if available, triggers background sync if stale.
  */
 export function ensureMetricsLoading(): void {
-  if (!metricCache && process.env.STATSIG_CONSOLE_API_KEY) {
+  if (!getMCache() && process.env.STATSIG_CONSOLE_API_KEY) {
     triggerMetricSync();
   } else if (isCacheStale() && process.env.STATSIG_CONSOLE_API_KEY) {
     triggerMetricSync();
@@ -133,13 +139,7 @@ export function matchMetrics(
   if (metrics.length === 0) return [];
 
   const questionLower = question.toLowerCase();
-  const stopWords = new Set([
-    'the', 'and', 'for', 'from', 'with', 'that', 'this',
-    'what', 'how', 'show', 'give', 'tell', 'about',
-  ]);
-  const keywords = questionLower
-    .split(/\s+/)
-    .filter((w) => w.length > 2 && !stopWords.has(w));
+  const keywords = extractKeywords(questionLower);
 
   if (keywords.length === 0) return [];
 

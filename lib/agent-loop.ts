@@ -19,6 +19,8 @@ import { executeTrinoMCP } from './trino-mcp';
 
 const MAX_ITERATIONS = 3;
 const PROGRESS_POLL_MS = 2500;
+/** Max rows sent to the client in a single NDJSON event (avoids OOM on serialization). */
+const MAX_CLIENT_ROWS = 2000;
 
 const encoder = new TextEncoder();
 
@@ -29,11 +31,34 @@ function emit(
   controller.enqueue(encoder.encode(JSON.stringify(event) + '\n'));
 }
 
+/** Emit an execution event, capping rows to avoid OOM on serialization. */
+function emitExecution(
+  controller: ReadableStreamDefaultController,
+  iteration: number,
+  results: QueryResult,
+): void {
+  emit(controller, {
+    type: 'execution',
+    iteration,
+    rowCount: results.rowCount,
+    columns: results.columns,
+    columnTypes: results.columnTypes,
+    rows: results.rows.length > MAX_CLIENT_ROWS
+      ? results.rows.slice(0, MAX_CLIENT_ROWS)
+      : results.rows,
+    executionTimeMs: results.executionTimeMs,
+  });
+}
+
 /**
  * Collect a ReadableStream into a single string.
+ * If signal is provided and aborted, cancels the stream and throws.
  */
-async function collectStream(stream: ReadableStream): Promise<string> {
+async function collectStream(stream: ReadableStream, signal?: AbortSignal): Promise<string> {
   const reader = stream.getReader();
+  if (signal) {
+    signal.addEventListener('abort', () => reader.cancel(), { once: true });
+  }
   const decoder = new TextDecoder();
   let result = '';
   while (true) {
@@ -41,21 +66,27 @@ async function collectStream(stream: ReadableStream): Promise<string> {
     if (done) break;
     result += decoder.decode(value, { stream: true });
   }
+  result += decoder.decode(); // flush remaining bytes
   return result;
 }
 
 /**
  * Stream a ReadableStream to the client as sql_chunk events,
  * returning the accumulated full text.
+ * If signal is provided and aborted, cancels the stream and throws.
  */
 async function streamSQLGeneration(
   controller: ReadableStreamDefaultController,
   stream: ReadableStream,
-  iteration: number
+  iteration: number,
+  signal?: AbortSignal,
 ): Promise<string> {
   emit(controller, { type: 'sql_start', iteration });
 
   const reader = stream.getReader();
+  if (signal) {
+    signal.addEventListener('abort', () => reader.cancel(), { once: true });
+  }
   const decoder = new TextDecoder();
   let result = '';
   while (true) {
@@ -65,15 +96,21 @@ async function streamSQLGeneration(
     result += delta;
     emit(controller, { type: 'sql_chunk', delta });
   }
+  const finalDelta = decoder.decode(); // flush remaining bytes
+  if (finalDelta) {
+    result += finalDelta;
+    emit(controller, { type: 'sql_chunk', delta: finalDelta });
+  }
   return result;
 }
 
 /**
- * Extract SQL from LLM response text (looks for ```sql ... ``` blocks).
+ * Extract SQL from LLM response text (takes the LAST ```sql ... ``` block,
+ * since the LLM often shows a "before" and "after" when revising).
  */
 function extractSQL(text: string): string {
-  const match = text.match(/```sql\n?([\s\S]*?)```/);
-  return match ? match[1].trim() : '';
+  const matches = [...text.matchAll(/```sql\n?([\s\S]*?)```/g)];
+  return matches.length > 0 ? matches[matches.length - 1][1].trim() : '';
 }
 
 /**
@@ -145,8 +182,16 @@ function getUnusedTables(
  * Returns an NDJSON ReadableStream of AgentEvent objects.
  */
 export function runAgentLoop(question: string, history?: ConversationTurn[], attachments?: Attachment[]): ReadableStream {
+  const abortController = new AbortController();
+
   return new ReadableStream({
+    cancel() {
+      abortController.abort();
+    },
     async start(controller) {
+      const checkAborted = () => {
+        if (abortController.signal.aborted) throw new DOMException('Aborted', 'AbortError');
+      };
       try {
         // Load context — wait for metadata so the LLM has table/column info
         if (getQueryLibrary().length === 0) loadQueryLibrary();
@@ -244,6 +289,7 @@ export function runAgentLoop(question: string, history?: ConversationTurn[], att
           finalIteration = iteration;
 
           // --- Generate SQL (streamed to client) ---
+          checkAborted();
           if (iteration > 1) {
             emit(controller, {
               type: 'thinking',
@@ -275,7 +321,7 @@ export function runAgentLoop(question: string, history?: ConversationTurn[], att
               );
             }
             // Stream the SQL generation to the client token-by-token
-            llmResponse = await streamSQLGeneration(controller, stream, iteration);
+            llmResponse = await streamSQLGeneration(controller, stream, iteration, abortController.signal);
           } catch (err) {
             emit(controller, {
               type: 'error',
@@ -322,6 +368,7 @@ export function runAgentLoop(question: string, history?: ConversationTurn[], att
           usedTableNames.push(...extractTablesFromSQL(sql));
 
           // --- Validate SQL (read-only check) ---
+          checkAborted();
           const sqlValidation = validateSQL(sql);
           if (!sqlValidation.valid) {
             emit(controller, {
@@ -371,9 +418,13 @@ export function runAgentLoop(question: string, history?: ConversationTurn[], att
           }
 
           // --- Execute ---
-          let execResult: { columns: string[]; columnTypes: string[]; rows: Record<string, unknown>[] };
+          checkAborted();
+          let execResult: { columns: string[]; columnTypes: string[]; rows: Record<string, unknown>[] } | undefined = undefined;
+          let execTimeMs = 0;
           try {
+            const t0 = Date.now();
             execResult = await executeTrinoMCP(currentSQL);
+            execTimeMs = Date.now() - t0;
           } catch (err) {
             const errorMsg = err instanceof Error ? err.message : 'Execution failed';
 
@@ -387,7 +438,7 @@ export function runAgentLoop(question: string, history?: ConversationTurn[], att
 
               try {
                 const fixStream = await fixSQL(currentSQL, errorMsg, question, relevantTables);
-                const fixResponse = await collectStream(fixStream);
+                const fixResponse = await collectStream(fixStream, abortController.signal);
                 const fixedSQL = extractSQL(fixResponse);
                 if (fixedSQL) {
                   currentSQL = fixedSQL;
@@ -402,7 +453,9 @@ export function runAgentLoop(question: string, history?: ConversationTurn[], att
                   const fixValidation = validateSQL(fixedSQL);
                   if (fixValidation.valid) {
                     try {
+                      const t1 = Date.now();
                       execResult = await executeTrinoMCP(fixedSQL);
+                      execTimeMs = Date.now() - t1;
                     } catch (retryErr) {
                       emit(controller, {
                         type: 'thinking',
@@ -417,7 +470,13 @@ export function runAgentLoop(question: string, history?: ConversationTurn[], att
                 } else {
                   continue;
                 }
-              } catch {
+              } catch (fixErr) {
+                console.error('[agent] fixSQL failed:', fixErr);
+                emit(controller, {
+                  type: 'thinking',
+                  iteration,
+                  content: `SQL fix attempt failed: ${fixErr instanceof Error ? fixErr.message : 'Unknown error'}. Retrying with different approach...`,
+                });
                 continue;
               }
             } else {
@@ -444,22 +503,15 @@ export function runAgentLoop(question: string, history?: ConversationTurn[], att
             columnTypes: execResult.columnTypes,
             rows: execResult.rows,
             rowCount: execResult.rows.length,
-            executionTimeMs: 0,
+            executionTimeMs: execTimeMs,
           };
 
-          emit(controller, {
-            type: 'execution',
-            iteration,
-            rowCount: results.rowCount,
-            columns: results.columns,
-            columnTypes: results.columnTypes,
-            rows: results.rows,
-            executionTimeMs: results.executionTimeMs,
-          });
+          emitExecution(controller, iteration, results);
 
           currentResults = results;
 
           // --- Validate results ---
+          checkAborted();
           if (results.rowCount === 0) {
             if (iteration < MAX_ITERATIONS) {
               emit(controller, {
@@ -509,7 +561,7 @@ export function runAgentLoop(question: string, history?: ConversationTurn[], att
                 relevantGitHubQueries,
                 attachments,
               );
-              const revisedResponse = await streamSQLGeneration(controller, revisedStream, iteration + 1);
+              const revisedResponse = await streamSQLGeneration(controller, revisedStream, iteration + 1, abortController.signal);
               const revisedSQL = extractSQL(revisedResponse);
               if (revisedSQL) {
                 currentSQL = revisedSQL;
@@ -524,24 +576,17 @@ export function runAgentLoop(question: string, history?: ConversationTurn[], att
                 const revisedValidation = validateSQL(revisedSQL);
                 if (revisedValidation.valid) {
                   try {
+                    const rt0 = Date.now();
                     const revisedExec = await executeTrinoMCP(revisedSQL);
                     const revisedResults: QueryResult = {
                       columns: revisedExec.columns,
                       columnTypes: revisedExec.columnTypes,
                       rows: revisedExec.rows,
                       rowCount: revisedExec.rows.length,
-                      executionTimeMs: 0,
+                      executionTimeMs: Date.now() - rt0,
                     };
 
-                    emit(controller, {
-                      type: 'execution',
-                      iteration: iteration + 1,
-                      rowCount: revisedResults.rowCount,
-                      columns: revisedResults.columns,
-                      columnTypes: revisedResults.columnTypes,
-                      rows: revisedResults.rows,
-                      executionTimeMs: 0,
-                    });
+                    emitExecution(controller, iteration + 1, revisedResults);
 
                     // Check date completeness on revised results too
                     const revisedDateCheck = checkDateCompleteness(question, revisedResults);
@@ -557,11 +602,19 @@ export function runAgentLoop(question: string, history?: ConversationTurn[], att
                     currentSQL = revisedSQL;
                     currentResults = revisedResults;
                     finalIteration = iteration + 1;
-                  } catch {
-                    // Revised query failed
+                  } catch (dateRetryErr) {
+                    console.error('[agent] Date-completeness revised query failed:', dateRetryErr);
+                    emit(controller, {
+                      type: 'thinking',
+                      iteration,
+                      content: `Revised query failed: ${dateRetryErr instanceof Error ? dateRetryErr.message : 'Unknown error'}. Proceeding with current results.`,
+                    });
                   }
                 }
               }
+              // The inline block above already consumed iteration+1, so bump
+              // the counter to avoid re-running that iteration in the main loop.
+              iteration++;
               continue;
             }
 
@@ -603,7 +656,7 @@ export function runAgentLoop(question: string, history?: ConversationTurn[], att
                     relevantGitHubQueries,
                     attachments,
                   );
-                  const revisedResponse = await streamSQLGeneration(controller, revisedStream, iteration + 1);
+                  const revisedResponse = await streamSQLGeneration(controller, revisedStream, iteration + 1, abortController.signal);
                   const revisedSQL = extractSQL(revisedResponse);
                   if (revisedSQL) {
                     currentSQL = revisedSQL;
@@ -620,24 +673,17 @@ export function runAgentLoop(question: string, history?: ConversationTurn[], att
                     const revisedValidation = validateSQL(revisedSQL);
                     if (revisedValidation.valid) {
                       try {
+                        const rt1 = Date.now();
                         const revisedExec = await executeTrinoMCP(revisedSQL);
                         const revisedResults: QueryResult = {
                           columns: revisedExec.columns,
                           columnTypes: revisedExec.columnTypes,
                           rows: revisedExec.rows,
                           rowCount: revisedExec.rows.length,
-                          executionTimeMs: 0,
+                          executionTimeMs: Date.now() - rt1,
                         };
 
-                        emit(controller, {
-                          type: 'execution',
-                          iteration: iteration + 1,
-                          rowCount: revisedResults.rowCount,
-                          columns: revisedResults.columns,
-                          columnTypes: revisedResults.columnTypes,
-                          rows: revisedResults.rows,
-                          executionTimeMs: 0,
-                        });
+                        emitExecution(controller, iteration + 1, revisedResults);
 
                         // Validate the revised results
                         if (revisedResults.rowCount > 0) {
@@ -662,11 +708,19 @@ export function runAgentLoop(question: string, history?: ConversationTurn[], att
                         currentSQL = revisedSQL;
                         currentResults = revisedResults;
                         finalIteration = iteration + 1;
-                      } catch {
-                        // Revised query also failed, continue with original results
+                      } catch (valRetryErr) {
+                        console.error('[agent] Validation revised query failed:', valRetryErr);
+                        emit(controller, {
+                          type: 'thinking',
+                          iteration,
+                          content: `Revised query failed: ${valRetryErr instanceof Error ? valRetryErr.message : 'Unknown error'}. Proceeding with current results.`,
+                        });
                       }
                     }
                   }
+                  // The inline block above already consumed iteration+1, so bump
+                  // the counter to avoid re-running that iteration in the main loop.
+                  iteration++;
                   continue;
                 }
               } else {
@@ -689,11 +743,12 @@ export function runAgentLoop(question: string, history?: ConversationTurn[], att
             }
           }
 
-          succeeded = true;
+          succeeded = currentResults !== null && currentResults.rowCount > 0;
           break;
         }
 
         // --- Stream analysis ---
+        checkAborted();
         let llmChartConfig: import('./types').ChartConfig | undefined;
 
         if (currentResults && currentResults.rowCount > 0) {
@@ -705,6 +760,7 @@ export function runAgentLoop(question: string, history?: ConversationTurn[], att
               history
             );
             const reader = analysisStream.getReader();
+            abortController.signal.addEventListener('abort', () => reader.cancel(), { once: true });
             const decoder = new TextDecoder();
             let fullAnalysis = '';
             while (true) {
@@ -713,6 +769,11 @@ export function runAgentLoop(question: string, history?: ConversationTurn[], att
               const delta = decoder.decode(value, { stream: true });
               fullAnalysis += delta;
               emit(controller, { type: 'analysis_chunk', delta });
+            }
+            const finalDelta = decoder.decode(); // flush remaining bytes
+            if (finalDelta) {
+              fullAnalysis += finalDelta;
+              emit(controller, { type: 'analysis_chunk', delta: finalDelta });
             }
 
             // Parse chart config from the completed analysis text
@@ -735,12 +796,18 @@ export function runAgentLoop(question: string, history?: ConversationTurn[], att
           ...(llmChartConfig ? { chartConfig: llmChartConfig } : {}),
         });
       } catch (err) {
-        emit(controller, {
-          type: 'error',
-          content: `Agent loop failed: ${err instanceof Error ? err.message : 'Unknown error'}`,
-        });
+        // Client disconnect — silently stop
+        if (err instanceof DOMException && err.name === 'AbortError') return;
+        try {
+          emit(controller, {
+            type: 'error',
+            content: `Agent loop failed: ${err instanceof Error ? err.message : 'Unknown error'}`,
+          });
+        } catch {
+          // Stream already closed (client disconnected) — nothing to do
+        }
       } finally {
-        controller.close();
+        try { controller.close(); } catch { /* already closed */ }
       }
     },
   });

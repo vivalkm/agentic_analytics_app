@@ -36,12 +36,23 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
           <p className="max-w-md text-sm text-muted-foreground">
             An unexpected error occurred while rendering. You can try again or clear your session.
           </p>
-          <Button
-            variant="outline"
-            onClick={() => this.setState({ hasError: false, error: null })}
-          >
-            Try Again
-          </Button>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              onClick={() => this.setState({ hasError: false, error: null })}
+            >
+              Try Again
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                try { localStorage.clear(); } catch {}
+                window.location.reload();
+              }}
+            >
+              Clear Session
+            </Button>
+          </div>
         </div>
       );
     }

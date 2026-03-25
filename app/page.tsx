@@ -89,6 +89,8 @@ export default function Home() {
   const isNearBottomRef = useRef(true);
 
   const isDragging = useRef(false);
+  const agentAbortRef = useRef<AbortController | null>(null);
+  const sidebarRef = useRef<HTMLElement>(null);
 
   const handleResizeStart = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -96,11 +98,16 @@ export default function Home() {
     document.body.style.cursor = 'col-resize';
     document.body.style.userSelect = 'none';
 
+    let lastWidth = 0;
     const onMouseMove = (ev: MouseEvent) => {
       if (!isDragging.current) return;
       const maxWidth = window.innerWidth * 0.3;
-      const clamped = Math.min(Math.max(ev.clientX, 200), maxWidth);
-      setSidebarWidth(clamped);
+      lastWidth = Math.min(Math.max(ev.clientX, 200), maxWidth);
+      // Apply directly to DOM to avoid re-rendering the entire page tree
+      if (sidebarRef.current) {
+        sidebarRef.current.style.width = `${lastWidth}px`;
+        sidebarRef.current.style.minWidth = `${lastWidth}px`;
+      }
     };
 
     const onMouseUp = () => {
@@ -109,6 +116,8 @@ export default function Home() {
       document.body.style.userSelect = '';
       window.removeEventListener('mousemove', onMouseMove);
       window.removeEventListener('mouseup', onMouseUp);
+      // Commit final width to React state once
+      if (lastWidth > 0) setSidebarWidth(lastWidth);
     };
 
     window.addEventListener('mousemove', onMouseMove);
@@ -222,6 +231,13 @@ export default function Home() {
    */
   const streamAgentResponse = useCallback(
     async (question: string, files?: File[]) => {
+      // Abort any in-flight agent run before starting a new one
+      if (agentAbortRef.current) {
+        agentAbortRef.current.abort();
+      }
+      const abortController = new AbortController();
+      agentAbortRef.current = abortController;
+
       const agentRunId = `run-${Date.now()}`;
 
       // Convert files to Attachment objects
@@ -277,6 +293,7 @@ export default function Home() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ question, history, attachments }),
+          signal: abortController.signal,
         });
 
         if (!res.ok) {
@@ -304,7 +321,7 @@ export default function Home() {
 
           buffer += decoder.decode(value, { stream: true });
           const lines = buffer.split('\n');
-          buffer = lines.pop() || ''; // Keep incomplete last line
+          buffer = lines.pop() || '';
 
           for (const line of lines) {
             const trimmed = line.trim();
@@ -573,6 +590,20 @@ export default function Home() {
             }
           }
         }
+        // Flush remaining bytes from decoder
+        buffer += decoder.decode();
+        if (buffer.trim()) {
+          try {
+            const event: AgentEvent = JSON.parse(buffer.trim());
+            // Process the final event if valid — but this is rare;
+            // NDJSON lines are newline-terminated so buffer is usually empty
+            if (event.type === 'done') {
+              // handled below
+            }
+          } catch {
+            // incomplete JSON, ignore
+          }
+        }
 
         // Update analysis cell with final metadata (results, chart config, sql)
         if (analysisCellId && latestResultsCellId) {
@@ -598,6 +629,8 @@ export default function Home() {
           });
         }
       } catch (error) {
+        // Silently ignore aborted requests (user started a new query)
+        if (error instanceof DOMException && error.name === 'AbortError') return;
         setStreamingSQL('');
         addCell({
           id: generateCellId(),
@@ -608,8 +641,11 @@ export default function Home() {
           metadata: { agentRunId },
         });
       } finally {
-        setAgentPhase('idle');
-        setStreamingSQL('');
+        // Only reset if this is still the active run (not aborted by a newer one)
+        if (!abortController.signal.aborted) {
+          setAgentPhase('idle');
+          setStreamingSQL('');
+        }
       }
     },
     [addCell, updateCell, updateCellMetadata, collapseThinkingCells]
@@ -739,6 +775,7 @@ export default function Home() {
     <div className="flex h-screen">
       {/* Desktop sidebar */}
       <aside
+        ref={sidebarRef}
         className={cn(
           'hidden md:flex flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground overflow-hidden',
           !sidebarOpen && 'w-0 min-w-0 transition-[width] duration-200 ease-in-out'

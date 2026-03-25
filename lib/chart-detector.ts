@@ -1,4 +1,5 @@
 import { QueryResult, ChartConfig } from './types';
+import { extractKeywords } from './stop-words';
 
 /**
  * Score how relevant a column name is to the user's question.
@@ -10,14 +11,7 @@ function scoreColumnRelevance(colName: string, question: string): number {
   let score = 0;
 
   // Extract keywords from question (split on spaces, filter short/stop words)
-  const stopWords = new Set([
-    'the', 'and', 'for', 'from', 'with', 'that', 'this', 'what', 'show',
-    'how', 'many', 'all', 'are', 'was', 'trend', 'daily', 'monthly',
-    'weekly', 'over', 'time', 'last', 'past', 'give', 'tell',
-  ]);
-  const keywords = q
-    .split(/\s+/)
-    .filter((w) => w.length > 2 && !stopWords.has(w));
+  const keywords = extractKeywords(q);
 
   // Direct keyword match in column name
   for (const kw of keywords) {

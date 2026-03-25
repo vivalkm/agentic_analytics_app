@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, existsSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, renameSync } from 'fs';
 import { join } from 'path';
 
 /** Metadata for each managed env var. */
@@ -80,38 +80,64 @@ export function readEnvLocal(): Record<string, string> {
  * Also updates the runtime override cache.
  */
 export function writeEnvLocal(updates: Record<string, string>): void {
-  // Update runtime cache immediately
+  // Update runtime cache immediately (strip newlines to prevent injection)
   for (const [key, value] of Object.entries(updates)) {
-    if (value) {
-      runtimeOverrides[key] = value;
+    const sanitized = value?.replace(/[\r\n]/g, '');
+    if (sanitized) {
+      runtimeOverrides[key] = sanitized;
     } else {
       delete runtimeOverrides[key];
     }
   }
 
-  // Read existing file
-  const existing = readEnvLocal();
-
-  // Merge updates
+  // Sanitize updates
+  const sanitizedUpdates: Record<string, string> = {};
   for (const [key, value] of Object.entries(updates)) {
     if (value) {
-      existing[key] = value;
+      sanitizedUpdates[key] = value.replace(/[\r\n]/g, '');
     } else {
-      delete existing[key];
+      sanitizedUpdates[key] = ''; // empty = delete
     }
   }
 
-  // Write back
-  const lines = Object.entries(existing)
-    .map(([key, value]) => {
-      // Quote values that contain spaces or special chars
-      if (value.includes(' ') || value.includes('#') || value.includes('"')) {
-        return `${key}="${value.replace(/"/g, '\\"')}"`;
-      }
-      return `${key}=${value}`;
-    });
+  // Read existing file lines to preserve comments and blank lines
+  const rawContent = existsSync(ENV_LOCAL_PATH) ? readFileSync(ENV_LOCAL_PATH, 'utf-8') : '';
+  const existingLines = rawContent.split('\n');
+  const handled = new Set<string>();
 
-  writeFileSync(ENV_LOCAL_PATH, lines.join('\n') + '\n', 'utf-8');
+  function formatValue(key: string, value: string): string {
+    if (value.includes(' ') || value.includes('#') || value.includes('"')) {
+      return `${key}="${value.replace(/"/g, '\\"')}"`;
+    }
+    return `${key}=${value}`;
+  }
+
+  // Update existing lines in-place, preserving comments and structure
+  const outputLines = existingLines.flatMap((line) => {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) return [line]; // preserve comments and blank lines
+
+    const eqIdx = trimmed.indexOf('=');
+    if (eqIdx === -1) return [line]; // preserve malformed lines
+
+    const key = trimmed.slice(0, eqIdx).trim();
+    if (!(key in sanitizedUpdates)) return [line]; // not being updated
+
+    handled.add(key);
+    if (!sanitizedUpdates[key]) return []; // delete the line
+    return [formatValue(key, sanitizedUpdates[key])];
+  });
+
+  // Append new keys not already in the file
+  for (const [key, value] of Object.entries(sanitizedUpdates)) {
+    if (!handled.has(key) && value) {
+      outputLines.push(formatValue(key, value));
+    }
+  }
+
+  const tmp = ENV_LOCAL_PATH + '.tmp';
+  writeFileSync(tmp, outputLines.join('\n'), 'utf-8');
+  renameSync(tmp, ENV_LOCAL_PATH);
 }
 
 /** Mask a secret value, showing only the last 4 characters. */

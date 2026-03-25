@@ -113,6 +113,19 @@ export function renderMarkdown(text: string): string {
   const lines = cleaned.split('\n');
   const outputParts: string[] = [];
   let i = 0;
+  let inParagraph = false;
+  let inList: 'ul' | 'ol' | null = null;
+
+  function closeParagraph() {
+    if (inParagraph) { outputParts.push('</p>'); inParagraph = false; }
+  }
+  function closeList() {
+    if (inList) { outputParts.push(inList === 'ol' ? '</ol>' : '</ul>'); inList = null; }
+  }
+  function ensureParagraph() {
+    closeList();
+    if (!inParagraph) { outputParts.push('<p class="mt-2">'); inParagraph = true; }
+  }
 
   while (i < lines.length) {
     // Skip partial chart block at the end (during streaming, may not have closing ```)
@@ -122,6 +135,8 @@ export function renderMarkdown(text: string): string {
 
     // Detect table blocks: consecutive lines starting with |
     if (/^\|/.test(lines[i])) {
+      closeParagraph();
+      closeList();
       const tableLines: string[] = [];
       while (i < lines.length && /^\|/.test(lines[i])) {
         tableLines.push(lines[i]);
@@ -135,44 +150,58 @@ export function renderMarkdown(text: string): string {
     i++;
 
     // Headers
-    if (/^### (.+)$/.test(line)) {
-      outputParts.push(line.replace(/^### (.+)$/, '<h4 class="font-semibold text-lg mt-3 mb-1">$1</h4>'));
+    const h3Match = line.match(/^### (.+)$/);
+    if (h3Match) {
+      closeParagraph(); closeList();
+      outputParts.push(`<h4 class="font-semibold text-lg mt-3 mb-1">${escapeHtml(h3Match[1])}</h4>`);
       continue;
     }
-    if (/^## (.+)$/.test(line)) {
-      outputParts.push(line.replace(/^## (.+)$/, '<h3 class="font-semibold text-lg mt-4 mb-1">$1</h3>'));
+    const h2Match = line.match(/^## (.+)$/);
+    if (h2Match) {
+      closeParagraph(); closeList();
+      outputParts.push(`<h3 class="font-semibold text-lg mt-4 mb-1">${escapeHtml(h2Match[1])}</h3>`);
       continue;
     }
-    if (/^# (.+)$/.test(line)) {
-      outputParts.push(line.replace(/^# (.+)$/, '<h3 class="font-semibold text-lg mt-4 mb-2">$1</h3>'));
+    const h1Match = line.match(/^# (.+)$/);
+    if (h1Match) {
+      closeParagraph(); closeList();
+      outputParts.push(`<h3 class="font-semibold text-lg mt-4 mb-2">${escapeHtml(h1Match[1])}</h3>`);
       continue;
     }
 
     // Bullet lists
     const bulletMatch = line.match(/^[\-\*] (.+)$/);
     if (bulletMatch) {
-      outputParts.push(`<li class="ml-4 list-disc">${inlineFormat(bulletMatch[1])}</li>`);
+      closeParagraph();
+      if (inList !== 'ul') { closeList(); outputParts.push('<ul class="ml-4 list-disc">'); inList = 'ul'; }
+      outputParts.push(`<li>${inlineFormat(bulletMatch[1])}</li>`);
       continue;
     }
 
-    // Numbered lists — render as unordered (bullet) lists
+    // Numbered lists
     const numMatch = line.match(/^\d+\. (.+)$/);
     if (numMatch) {
-      outputParts.push(`<li class="ml-4 list-disc">${inlineFormat(numMatch[1])}</li>`);
+      closeParagraph();
+      if (inList !== 'ol') { closeList(); outputParts.push('<ol class="ml-4 list-decimal">'); inList = 'ol'; }
+      outputParts.push(`<li>${inlineFormat(numMatch[1])}</li>`);
       continue;
     }
 
     // Empty line = paragraph break
     if (line.trim() === '') {
-      outputParts.push('</p><p class="mt-2">');
+      closeParagraph();
+      closeList();
       continue;
     }
 
     // Regular text with inline formatting
+    ensureParagraph();
     outputParts.push(inlineFormat(line) + '<br/>');
   }
 
-  return `<p>${outputParts.join('\n')}</p>`;
+  closeParagraph();
+  closeList();
+  return outputParts.join('\n');
 }
 
 export function AnalysisCard({
@@ -204,7 +233,7 @@ export function AnalysisCard({
       </CardHeader>
       <CardContent>
         <div
-          className="prose prose-sm prose-invert max-w-none text-base leading-relaxed text-foreground"
+          className="prose prose-sm dark:prose-invert max-w-none text-base leading-relaxed text-foreground"
           dangerouslySetInnerHTML={{ __html: renderMarkdown(body) }}
         />
 

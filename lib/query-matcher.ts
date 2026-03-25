@@ -1,4 +1,5 @@
 import { QueryLibraryEntry } from './types';
+import { extractKeywords } from './stop-words';
 import fs from 'fs';
 import path from 'path';
 
@@ -75,7 +76,13 @@ function ensureSqlLoaded(entry: QueryLibraryEntry): void {
  * comment block.
  */
 function readHeader(filePath: string): string {
-  const content = fs.readFileSync(filePath, 'utf-8');
+  // Read only the first 2KB — headers are typically <500 bytes.
+  // Avoids loading multi-KB SQL bodies just to parse a 3-line comment block.
+  const fd = fs.openSync(filePath, 'r');
+  const buf = Buffer.alloc(2048);
+  const bytesRead = fs.readSync(fd, buf, 0, 2048, 0);
+  fs.closeSync(fd);
+  const content = buf.toString('utf-8', 0, bytesRead);
   const lines = content.split('\n');
   const headerLines: string[] = [];
 
@@ -166,12 +173,7 @@ export function matchQueries(
   if (queryLibrary.length === 0) loadQueryLibrary();
 
   const questionLower = question.toLowerCase();
-  const stopWords = new Set([
-    'the', 'and', 'for', 'from', 'with', 'that', 'this',
-  ]);
-  const keywords = questionLower
-    .split(/\s+/)
-    .filter((w) => w.length > 2 && !stopWords.has(w));
+  const keywords = extractKeywords(questionLower);
 
   // Pass 1: score on metadata only (description, filename, tags)
   const scored = queryLibrary.map((entry) => {
