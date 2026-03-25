@@ -27,7 +27,8 @@ const getClient = () =>
 
 const getModel = () => getEnv('ANTHROPIC_MODEL') || 'claude-sonnet-4-20250514';
 
-const SQL_SYSTEM_PROMPT = `You are a SQL analyst for a Trino-based data lakehouse. You write precise, efficient Trino SQL.
+function getSQLSystemPrompt() {
+  return `You are a SQL analyst for a Trino-based data lakehouse. You write precise, efficient Trino SQL.
 Today's date is ${new Date().toISOString().slice(0, 10)}. When the user refers to relative time periods ("this month", "this quarter", "last year", "in March") without specifying a year, always assume the CURRENT year (${new Date().getFullYear()}) or use CURRENT_DATE-based expressions. Never default to a past year.
 DEFAULT TIME WINDOW: If the user's question does NOT mention any specific time period, date range, or relative time reference, default to the most recent 12 months (CURRENT_DATE - INTERVAL '12' MONTH to CURRENT_DATE). Always include an explicit date filter — never query without a time boundary.
 
@@ -55,6 +56,7 @@ Rules:
 - If the question is vague or ambiguous (e.g. "products", "return rate" with no clear column mapping), do NOT guess. Instead, skip the SQL block entirely and ask the user clarifying questions. Explain what specific terms could mean given the available tables, and ask the user to pick. Only generate SQL when you can confidently map the question to specific columns.
 - Output the SQL in a \`\`\`sql code block, followed by a brief explanation
 - After the explanation, list any assumptions you made`;
+}
 
 const ANALYSIS_SYSTEM_PROMPT = `You are a senior data analyst. Given the SQL query, the user's original question, and the query results, provide:
 1. A 2-3 sentence executive summary
@@ -284,7 +286,7 @@ export async function generateSQL(
 
   const domain = getDomainContext();
   const systemPrompt =
-    SQL_SYSTEM_PROMPT +
+    getSQLSystemPrompt() +
     (domain ? `\n\n${domain}` : '') +
     metricContext +
     queryContext +
@@ -380,7 +382,7 @@ export async function fixSQL(
   const tableContext = buildTableContext(relevantTables);
   const domain = getDomainContext();
   const systemPrompt =
-    SQL_SYSTEM_PROMPT +
+    getSQLSystemPrompt() +
     (domain ? `\n\n${domain}` : '') +
     '\n\nAvailable tables and their schemas:\n' +
     tableContext;
@@ -527,7 +529,7 @@ export async function generateRevisedSQL(
 
   const domain = getDomainContext();
   const systemPrompt =
-    SQL_SYSTEM_PROMPT +
+    getSQLSystemPrompt() +
     (domain ? `\n\n${domain}` : '') +
     metricContext +
     queryContext +

@@ -90,9 +90,18 @@ function renderTable(tableLines: string[]): string {
   return `<div class="my-3 overflow-x-auto rounded-lg border border-border"><table class="w-full"><thead><tr class="border-b border-border bg-muted/30">${thCells}</tr></thead><tbody class="divide-y divide-border/30">${tbodyRows}</tbody></table></div>`;
 }
 
-/** Apply inline formatting (bold, italic, code) */
-function inlineFormat(text: string): string {
+/** Escape HTML entities to prevent XSS from LLM output */
+function escapeHtml(text: string): string {
   return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+/** Apply inline formatting (bold, italic, code) — escapes HTML first */
+function inlineFormat(text: string): string {
+  return escapeHtml(text)
     .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
     .replace(/\*(.*?)\*/g, '<em>$1</em>')
     .replace(/`([^`]+)`/g, '<code class="rounded bg-muted px-1 py-0.5 text-base font-mono">$1</code>');

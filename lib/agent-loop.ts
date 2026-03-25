@@ -386,7 +386,7 @@ export function runAgentLoop(question: string, history?: ConversationTurn[], att
               });
 
               try {
-                const fixStream = await fixSQL(errorMsg, currentSQL, question, relevantTables);
+                const fixStream = await fixSQL(currentSQL, errorMsg, question, relevantTables);
                 const fixResponse = await collectStream(fixStream);
                 const fixedSQL = extractSQL(fixResponse);
                 if (fixedSQL) {
@@ -430,11 +430,20 @@ export function runAgentLoop(question: string, history?: ConversationTurn[], att
             }
           }
 
+          if (!execResult) {
+            emit(controller, {
+              type: 'error',
+              content: 'SQL execution failed after all retry attempts',
+              iteration,
+            });
+            break;
+          }
+
           const results: QueryResult = {
-            columns: execResult!.columns,
-            columnTypes: execResult!.columnTypes,
-            rows: execResult!.rows,
-            rowCount: execResult!.rows.length,
+            columns: execResult.columns,
+            columnTypes: execResult.columnTypes,
+            rows: execResult.rows,
+            rowCount: execResult.rows.length,
             executionTimeMs: 0,
           };
 
