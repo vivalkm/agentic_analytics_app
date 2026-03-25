@@ -785,8 +785,14 @@ export function runAgentLoop(question: string, history?: ConversationTurn[], att
 
             // Parse chart config from the completed analysis text
             const { chartConfig } = parseChartConfigFromAnalysis(fullAnalysis);
-            if (chartConfig) {
-              llmChartConfig = chartConfig;
+            if (chartConfig && chartConfig.type !== 'none' && currentResults) {
+              // Validate that LLM-suggested keys actually exist in the result columns
+              const colSet = new Set(currentResults.columns.map((c) => c.toLowerCase()));
+              const xValid = colSet.has(chartConfig.xKey.toLowerCase());
+              const yValid = chartConfig.yKeys.some((k) => colSet.has(k.toLowerCase()));
+              if (xValid && yValid) {
+                llmChartConfig = chartConfig;
+              }
             }
           } catch (err) {
             emit(controller, {

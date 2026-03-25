@@ -521,8 +521,9 @@ export default function Home() {
                   updateCellMetadata(analysisCellId, { iteration: event.iterations });
                 }
 
-                // If LLM provided a chart config, override the heuristic one on the results cell
-                if (event.chartConfig && latestResultsCellId) {
+                // If LLM provided a non-'none' chart config, override the heuristic one on the results cell.
+                // Skip 'none' so we don't discard a working heuristic chart.
+                if (event.chartConfig && event.chartConfig.type !== 'none' && latestResultsCellId) {
                   updateCellMetadata(latestResultsCellId, { chartConfig: event.chartConfig });
                 }
 
