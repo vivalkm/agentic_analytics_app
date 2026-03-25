@@ -17,6 +17,7 @@ import { QueryLibrary } from '@/components/query-library';
 import { MetricsCatalog } from '@/components/metrics-catalog';
 import { SettingsDialog } from '@/components/settings-dialog';
 import { ApiKeyPrompt } from '@/components/api-key-prompt';
+import { ExportAnalysis } from '@/components/export-analysis';
 import { Database, Trash2, Loader2, Sparkles, Play, Search, CheckCircle2, PanelLeft, PanelLeftClose, Menu, ArrowDown, Sun, Moon, Keyboard, MessageCircleQuestion, RefreshCw, DatabaseZap, Heart, Settings } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
@@ -738,6 +739,12 @@ export default function Home() {
 
   const isLoading = agentPhase !== 'idle' || isExecuting;
 
+  const handleStop = useCallback(() => {
+    agentAbortRef.current?.abort();
+    setAgentPhase('idle');
+    setStreamingSQL('');
+  }, []);
+
   const phaseConfig: Record<AgentPhase, { icon: typeof Loader2; text: string; color: string }> = {
     idle: { icon: Loader2, text: '', color: '' },
     generating: {
@@ -786,6 +793,7 @@ export default function Home() {
     <div className="flex h-screen">
       {/* Desktop sidebar */}
       <aside
+        data-print-hide
         ref={sidebarRef}
         className={cn(
           'hidden md:flex flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground overflow-hidden',
@@ -817,7 +825,7 @@ export default function Home() {
       {/* Main content */}
       <div className="flex flex-1 flex-col min-w-0">
         {/* Header */}
-        <header className="flex items-center justify-between border-b border-border bg-card/50 backdrop-blur-sm px-4 py-2.5 sticky top-0 z-20">
+        <header data-print-hide className="flex items-center justify-between border-b border-border bg-card/50 backdrop-blur-sm px-4 py-2.5 sticky top-0 z-20">
           <div className="flex items-center gap-2.5">
             {/* Mobile hamburger */}
             <Tooltip>
@@ -912,6 +920,11 @@ export default function Home() {
               </TooltipTrigger>
               <TooltipContent>Toggle theme</TooltipContent>
             </Tooltip>
+
+            {/* Export analysis */}
+            {cells.some((c) => c.type === 'analysis') && (
+              <ExportAnalysis cells={cells} disabled={agentPhase !== 'idle'} />
+            )}
 
             {/* Clear session */}
             {cells.length > 0 && (
@@ -1032,10 +1045,12 @@ export default function Home() {
                       </div>
                       {cell.metadata.chartConfig &&
                         cell.metadata.chartConfig.type !== 'none' && (
-                          <ChartRenderer
-                            config={cell.metadata.chartConfig}
-                            results={cell.metadata.results}
-                          />
+                          <div data-run-id={cell.metadata.agentRunId}>
+                            <ChartRenderer
+                              config={cell.metadata.chartConfig}
+                              results={cell.metadata.results}
+                            />
+                          </div>
                         )}
                       <RawDataPreview results={cell.metadata.results} />
                     </div>
@@ -1126,18 +1141,36 @@ export default function Home() {
           })}
 
           {/* Streaming SQL preview — shows while SQL is being generated token-by-token */}
-          {streamingSQL && agentPhase === 'generating' && (
-            <div className="rounded-xl border border-border bg-zinc-950 overflow-hidden shadow-sm">
-              <div className="flex items-center gap-2 border-b border-white/10 px-4 py-2">
-                <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
-                <span className="text-xs font-medium text-zinc-400">Writing SQL...</span>
+          {streamingSQL && agentPhase === 'generating' && (() => {
+            // Extract only the SQL portion once ```sql appears, hide the preamble explanation
+            const sqlBlockStart = streamingSQL.indexOf('```sql');
+            const sqlOnly = sqlBlockStart >= 0
+              ? streamingSQL.slice(sqlBlockStart + 6).replace(/```$/, '')
+              : null;
+            const preamble = sqlBlockStart >= 0
+              ? streamingSQL.slice(0, sqlBlockStart).trim()
+              : streamingSQL.trim();
+            return (
+              <div className="rounded-xl border border-border bg-zinc-950 overflow-hidden shadow-sm">
+                <div className="flex items-center gap-2 border-b border-white/10 px-4 py-2">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
+                  <span className="text-xs font-medium text-zinc-400">Writing SQL...</span>
+                </div>
+                {sqlOnly === null && preamble && (
+                  <div className="px-4 py-2 text-sm text-zinc-400 border-b border-white/5">
+                    {preamble}
+                    <span className="inline-block w-1.5 h-4 bg-primary animate-pulse ml-0.5 align-text-bottom" />
+                  </div>
+                )}
+                {sqlOnly !== null && (
+                  <pre className="p-4 text-base leading-relaxed text-zinc-300 font-mono whitespace-pre-wrap overflow-x-auto">
+                    {sqlOnly}
+                    <span className="inline-block w-1.5 h-4 bg-primary animate-pulse ml-0.5 align-text-bottom" />
+                  </pre>
+                )}
               </div>
-              <pre className="p-4 text-base leading-relaxed text-zinc-300 font-mono whitespace-pre-wrap overflow-x-auto">
-                {streamingSQL}
-                <span className="inline-block w-1.5 h-4 bg-primary animate-pulse ml-0.5 align-text-bottom" />
-              </pre>
-            </div>
-          )}
+            );
+          })()}
 
           {/* Inline status indicator — visible in the main content area */}
           {isLoading && agentPhase !== 'idle' && !streamingSQL && (
@@ -1162,6 +1195,7 @@ export default function Home() {
         {/* Scroll to bottom button */}
         {showScrollToBottom && (
           <button
+            data-print-hide
             onClick={scrollToBottom}
             className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10 flex items-center gap-1.5 rounded-full border border-border bg-card/95 px-3.5 py-2 text-xs font-medium text-muted-foreground shadow-lg backdrop-blur-sm transition-all hover:text-foreground hover:border-primary hover:shadow-xl"
           >
@@ -1173,17 +1207,18 @@ export default function Home() {
         </ErrorBoundary>
 
         {/* Input pinned at bottom */}
-        <div className="border-t border-border bg-card/50 backdrop-blur-sm p-4">
+        <div data-print-hide className="border-t border-border bg-card/50 backdrop-blur-sm p-4">
           <div className="mx-auto max-w-4xl">
             <ChatInput
               onSubmit={streamAgentResponse}
+              onStop={handleStop}
               isLoading={isLoading}
               prefillValue={prefillValue}
               prefillKey={prefillKey}
             />
           </div>
         </div>
-        <p className="py-1.5 text-center text-xs text-muted-foreground/50">
+        <p data-print-hide className="py-1.5 text-center text-xs text-muted-foreground/50">
           Created by Lincoln Li with <Heart className="inline h-3 w-3 fill-red-500 text-red-500 align-text-bottom" />
         </p>
       </div>

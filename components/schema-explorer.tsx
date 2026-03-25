@@ -305,10 +305,10 @@ function CatalogNode({
   isRefreshing: boolean;
 }) {
   const schemaEntries = Object.entries(schemas);
-  const controlled = forceOpen ? { open: true } : {};
+  const [open, setOpen] = useState(defaultOpen);
 
   return (
-    <Collapsible.Root defaultOpen={defaultOpen} {...controlled}>
+    <Collapsible.Root open={forceOpen || open} onOpenChange={setOpen}>
       <Collapsible.Trigger className="flex w-full items-center gap-1.5 rounded px-1.5 py-1 text-sm font-medium hover:bg-sidebar-accent group">
         <ChevronRight className="h-3.5 w-3.5 text-muted-foreground transition-transform group-data-[open]:rotate-90" />
         <Database className="h-3.5 w-3.5 text-muted-foreground" />
@@ -355,11 +355,11 @@ function SchemaNode({
   isPriority: boolean;
   isRefreshing: boolean;
 }) {
-  const controlled = forceOpen ? { open: true } : {};
+  const [open, setOpen] = useState(isPriority);
   const isEmpty = tables.length === 0;
 
   return (
-    <Collapsible.Root defaultOpen={isPriority} {...controlled}>
+    <Collapsible.Root open={forceOpen || open} onOpenChange={setOpen}>
       <Collapsible.Trigger className="flex w-full items-center gap-1.5 rounded px-1.5 py-1 text-sm hover:bg-sidebar-accent group">
         <ChevronRight className="h-3.5 w-3.5 text-muted-foreground transition-transform group-data-[open]:rotate-90" />
         <Folder className="h-3.5 w-3.5 text-muted-foreground group-data-[open]:hidden" />
@@ -421,10 +421,10 @@ function TableNode({
   onTableClick: (fqn: string) => void;
   forceOpen: boolean;
 }) {
-  const controlled = forceOpen ? { open: true } : {};
+  const [open, setOpen] = useState(false);
 
   return (
-    <Collapsible.Root {...controlled}>
+    <Collapsible.Root open={forceOpen || open} onOpenChange={setOpen}>
       <div className="flex items-center gap-0.5">
         <Collapsible.Trigger className="flex items-center p-1 rounded hover:bg-sidebar-accent group">
           <ChevronRight className="h-2.5 w-2.5 text-muted-foreground transition-transform group-data-[open]:rotate-90" />

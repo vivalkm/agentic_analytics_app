@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { Send, Loader2, Paperclip, X, FileText, Image as ImageIcon } from 'lucide-react';
+import { Send, Square, Paperclip, X, FileText, Image as ImageIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 
@@ -14,6 +14,7 @@ const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 
 interface ChatInputProps {
   onSubmit: (question: string, files?: File[]) => void;
+  onStop?: () => void;
   isLoading: boolean;
   placeholder?: string;
   prefillValue?: string;
@@ -22,6 +23,7 @@ interface ChatInputProps {
 
 export function ChatInput({
   onSubmit,
+  onStop,
   isLoading,
   placeholder = 'Ask a question about your data... (⌘+Enter to submit)',
   prefillValue,
@@ -75,8 +77,12 @@ export function ChatInput({
         e.preventDefault();
         handleSubmit();
       }
+      if (e.key === 'Escape' && isLoading && onStop) {
+        e.preventDefault();
+        onStop();
+      }
     },
-    [handleSubmit]
+    [handleSubmit, isLoading, onStop]
   );
 
   // Drag-and-drop handlers
@@ -214,21 +220,29 @@ export function ChatInput({
           }}
         />
 
-        {/* Send button */}
-        <Tooltip>
-          <TooltipTrigger
-            render={<Button size="icon" className="h-8 w-8 shrink-0" />}
-            onClick={handleSubmit}
-            disabled={!value.trim() || isLoading}
-          >
-            {isLoading ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
+        {/* Send / Stop button */}
+        {isLoading && onStop ? (
+          <Tooltip>
+            <TooltipTrigger
+              render={<Button size="icon" variant="destructive" className="h-8 w-8 shrink-0" />}
+              onClick={onStop}
+            >
+              <Square className="h-3.5 w-3.5 fill-current" />
+            </TooltipTrigger>
+            <TooltipContent>Stop (Esc)</TooltipContent>
+          </Tooltip>
+        ) : (
+          <Tooltip>
+            <TooltipTrigger
+              render={<Button size="icon" className="h-8 w-8 shrink-0" />}
+              onClick={handleSubmit}
+              disabled={!value.trim()}
+            >
               <Send className="h-4 w-4" />
-            )}
-          </TooltipTrigger>
-          <TooltipContent>Send (⌘+Enter)</TooltipContent>
-        </Tooltip>
+            </TooltipTrigger>
+            <TooltipContent>Send (⌘+Enter)</TooltipContent>
+          </Tooltip>
+        )}
       </div>
     </div>
   );

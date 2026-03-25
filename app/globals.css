@@ -148,3 +148,42 @@
     background: oklch(0.5 0 0 / 35%);
   }
 }
+
+/* ── Print styles for PDF export ── */
+@media print {
+  /* Force light-mode colors */
+  :root {
+    --background: oklch(0.985 0.002 260);
+    --foreground: oklch(0.13 0.02 260);
+    --card: oklch(1 0 0);
+    --card-foreground: oklch(0.13 0.02 260);
+    --muted: oklch(0.96 0.006 260);
+    --muted-foreground: oklch(0.50 0.02 260);
+    --border: oklch(0.91 0.008 260);
+  }
+
+  body {
+    background: white !important;
+    color: black !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* Hide non-content UI */
+  [data-print-hide] {
+    display: none !important;
+  }
+
+  /* Keep charts and analysis together */
+  [data-slot="card"],
+  svg {
+    break-inside: avoid;
+  }
+
+  /* Full-width content */
+  main {
+    margin: 0 !important;
+    padding: 0 !important;
+    max-width: 100% !important;
+  }
+}

@@ -466,32 +466,45 @@ export function getPrioritySchemaNames(): string[] {
  * Mutates the cache in-place so subsequent calls see the columns.
  */
 export async function ensureColumnsLoaded(tables: TableMetadata[]): Promise<TableMetadata[]> {
-  const schemasToLoad = new Set<string>();
-  for (const t of tables) {
-    if (t.columns.length === 0) {
-      schemasToLoad.add(`${t.catalog}.${t.schema}`);
-    }
-  }
-  if (schemasToLoad.size === 0) return tables;
+  const needColumns = tables.filter((t) => t.columns.length === 0);
+  if (needColumns.length === 0) return tables;
 
   const cache = getCache();
-  if (!cache) return tables;
 
-  for (const key of schemasToLoad) {
-    const [catalog, schema] = key.split('.');
-    console.log(`[metadata] On-demand column load for ${catalog}.${schema}`);
-    await loadSchemaColumns(catalog, schema, cache.catalogs, cache.schemas, cache.tables);
+  // Describe individual tables (fast) instead of entire schemas (slow for large schemas like public)
+  const results = await Promise.allSettled(
+    needColumns.map(async (t) => {
+      console.log(`[metadata] On-demand column load for ${t.catalog}.${t.schema}.${t.table}`);
+      const cols = await describeTable(t.table, t.schema);
+      return { key: `${t.catalog}.${t.schema}.${t.table}`, cols };
+    })
+  );
+
+  const columnsByFqn = new Map<string, { name: string; type: string; comment?: string }[]>();
+  for (const r of results) {
+    if (r.status === 'fulfilled') {
+      columnsByFqn.set(r.value.key, r.value.cols);
+    } else {
+      console.warn('[metadata] On-demand column load failed:', r.reason);
+    }
   }
 
-  // Re-fetch from updated cache
-  const updated = getCache();
-  if (!updated) return tables;
+  // Update cache entries in-place so future calls also benefit
+  if (cache) {
+    for (const ct of cache.tables) {
+      const fqn = `${ct.catalog}.${ct.schema}.${ct.table}`;
+      const cols = columnsByFqn.get(fqn);
+      if (cols && ct.columns.length === 0) {
+        ct.columns = cols;
+      }
+    }
+    saveCacheToDisk(cache);
+  }
 
   return tables.map((t) => {
     if (t.columns.length > 0) return t;
-    const fresh = updated.tables.find(
-      (u) => u.catalog === t.catalog && u.schema === t.schema && u.table === t.table
-    );
-    return fresh || t;
+    const fqn = `${t.catalog}.${t.schema}.${t.table}`;
+    const cols = columnsByFqn.get(fqn);
+    return cols ? { ...t, columns: cols } : t;
   });
 }
