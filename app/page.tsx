@@ -1,5 +1,6 @@
 'use client';
 
+import { APP_NAME, APP_DESCRIPTION } from '@/lib/constants';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { ChatInput } from '@/components/chat-input';
 import { SQLEditor } from '@/components/sql-editor';
@@ -60,7 +61,16 @@ function buildHistory(cells: NotebookCell[], maxTurns = 10): ConversationTurn[] 
       analysis: run.analysis ? run.analysis.slice(0, 1000) : undefined,
     });
   }
-  return turns.slice(-maxTurns);
+  const result = turns.slice(-maxTurns);
+  // Give the most recent turn a larger analysis window so follow-ups like "continue" work
+  if (result.length > 0) {
+    const last = result[result.length - 1];
+    const lastRun = Array.from(runs.values()).find((r) => r.question === last.question);
+    if (lastRun?.analysis) {
+      last.analysis = lastRun.analysis.slice(0, 4000);
+    }
+  }
+  return result;
 }
 
 export default function Home() {
@@ -838,8 +848,8 @@ export default function Home() {
                 <Database className="h-4 w-4 text-primary" />
               </div>
               <div>
-                <h1 className="text-base font-semibold tracking-tight leading-none">Cortex Analytics</h1>
-                <p className="text-[10px] text-muted-foreground/60 leading-tight mt-0.5">Full-stack autonomous analytics system</p>
+                <h1 className="text-base font-semibold tracking-tight leading-none">{APP_NAME}</h1>
+                <p className="text-xs text-muted-foreground leading-tight mt-0.5">{APP_DESCRIPTION}</p>
               </div>
             </div>
           </div>
@@ -930,10 +940,10 @@ export default function Home() {
                 <Database className="h-8 w-8 text-primary" />
               </div>
               <h2 className="text-2xl font-bold tracking-tight text-foreground">
-                Cortex Analytics
+                {APP_NAME}
               </h2>
               <p className="mt-1 text-sm text-muted-foreground/70">
-                Full-stack autonomous analytics system
+                {APP_DESCRIPTION}
               </p>
               <p className="mt-3 max-w-lg text-lg leading-relaxed text-muted-foreground">
                 Ask questions about your data in plain English. I&apos;ll generate

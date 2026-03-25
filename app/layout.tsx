@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import { Inter, JetBrains_Mono } from 'next/font/google';
+import { APP_NAME, APP_DESCRIPTION } from '@/lib/constants';
 import { ThemeProvider } from '@/components/theme-provider';
 import './globals.css';
 
@@ -16,8 +17,8 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: 'Cortex Analytics',
-  description: 'Full-stack autonomous analytics system',
+  title: APP_NAME,
+  description: APP_DESCRIPTION,
 };
 
 export default function RootLayout({
