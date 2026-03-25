@@ -270,7 +270,6 @@ export default function Home() {
       let analysisText = '';
       let latestResultsCellId: string | null = null;
       let finalIteration = 1;
-      let currentStreamingIteration = 1;
 
       try {
         const history = buildHistory(cellsRef.current);
@@ -353,7 +352,6 @@ export default function Home() {
                 setAgentPhase('generating');
                 setAgentIteration(event.iteration);
                 setStatusText('');
-                currentStreamingIteration = event.iteration;
                 setStreamingSQL('');
                 break;
               }
@@ -762,7 +760,7 @@ export default function Home() {
 
       {/* Mobile sidebar (Sheet) — only mount content when open to avoid duplicate fetches */}
       <Sheet open={mobileSheetOpen} onOpenChange={setMobileSheetOpen}>
-        <SheetContent side="left" className="w-[300px] p-0 bg-sidebar text-sidebar-foreground">
+        <SheetContent side="left" className="w-75 p-0 bg-sidebar text-sidebar-foreground">
           <SheetTitle className="sr-only">Navigation</SheetTitle>
           {mobileSheetOpen && sidebarContent}
         </SheetContent>
