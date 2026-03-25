@@ -153,19 +153,19 @@ export function renderMarkdown(text: string): string {
     const h3Match = line.match(/^### (.+)$/);
     if (h3Match) {
       closeParagraph(); closeList();
-      outputParts.push(`<h4 class="font-semibold text-lg mt-3 mb-1">${escapeHtml(h3Match[1])}</h4>`);
+      outputParts.push(`<h4 class="font-semibold text-lg mt-3 mb-1 text-foreground">${escapeHtml(h3Match[1])}</h4>`);
       continue;
     }
     const h2Match = line.match(/^## (.+)$/);
     if (h2Match) {
       closeParagraph(); closeList();
-      outputParts.push(`<h3 class="font-semibold text-lg mt-4 mb-1">${escapeHtml(h2Match[1])}</h3>`);
+      outputParts.push(`<h3 class="font-semibold text-lg mt-4 mb-1 text-foreground">${escapeHtml(h2Match[1])}</h3>`);
       continue;
     }
     const h1Match = line.match(/^# (.+)$/);
     if (h1Match) {
       closeParagraph(); closeList();
-      outputParts.push(`<h3 class="font-semibold text-lg mt-4 mb-2">${escapeHtml(h1Match[1])}</h3>`);
+      outputParts.push(`<h3 class="font-semibold text-lg mt-4 mb-2 text-foreground">${escapeHtml(h1Match[1])}</h3>`);
       continue;
     }
 
@@ -233,7 +233,7 @@ export function AnalysisCard({
       </CardHeader>
       <CardContent>
         <div
-          className="prose prose-sm dark:prose-invert max-w-none text-base leading-relaxed text-foreground"
+          className="prose prose-sm dark:prose-invert max-w-none text-base leading-relaxed text-foreground/85"
           dangerouslySetInnerHTML={{ __html: renderMarkdown(body) }}
         />
 
