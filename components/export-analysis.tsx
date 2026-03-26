@@ -22,7 +22,7 @@ interface ExportableRun {
   question: string;
   sql: string;
   analysis: string;
-  chartSvg?: string;
+  chartHtml?: string;
   rowCount?: number;
   executionTimeMs?: number;
 }
@@ -85,21 +85,25 @@ function buildExportableRuns(cells: NotebookCell[]): ExportableRun[] {
   const result: ExportableRun[] = [];
   for (const run of runs.values()) {
     if (!run.question || !run.analysis) continue;
-    // Try to capture chart SVG from the DOM with resolved CSS variables
-    let chartSvg: string | undefined;
+    // Capture the full chart (SVG + legend) from the DOM
+    let chartHtml: string | undefined;
     if (run.agentRunId) {
-      const container = document.querySelector(`[data-run-id="${run.agentRunId}"] svg`);
-      if (container) {
-        const clone = container.cloneNode(true) as SVGElement;
-        resolveCssVars(container, clone);
-        chartSvg = clone.outerHTML;
+      const wrapper = document.querySelector(
+        `[data-run-id="${run.agentRunId}"] .recharts-wrapper`
+      );
+      if (wrapper) {
+        const clone = wrapper.cloneNode(true) as HTMLElement;
+        resolveCssVars(wrapper, clone);
+        // Make the clone self-contained: replace absolute positioning with static flow
+        clone.style.position = 'relative';
+        chartHtml = clone.outerHTML;
       }
     }
     result.push({
       question: run.question,
       sql: run.sql || '',
       analysis: run.analysis,
-      chartSvg,
+      chartHtml,
       rowCount: run.rowCount,
       executionTimeMs: run.executionTimeMs,
     });
@@ -130,8 +134,12 @@ const EXPORT_STYLES = `
   .question-block { background: #f0f4ff; border-left: 3px solid #4f6ef7; padding: 0.75rem 1rem; margin: 1.5rem 0 1rem; border-radius: 0.375rem; }
   .question-block p { margin: 0; font-weight: 500; color: #1e3a8a; }
   .sql-block { background: #1e1e2e; color: #a6adc8; padding: 1rem; border-radius: 0.5rem; overflow-x: auto; margin: 0.75rem 0; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 0.8rem; line-height: 1.5; white-space: pre; }
-  .chart-container { margin: 1rem 0; text-align: center; }
+  .chart-container { margin: 1rem 0; }
+  .chart-container .recharts-wrapper { max-width: 100%; }
   .chart-container svg { max-width: 100%; height: auto; }
+  .recharts-legend-wrapper { position: static !important; width: auto !important; text-align: center; padding-top: 0.5rem; }
+  .recharts-legend-item { display: inline-flex; align-items: center; margin: 0 0.5rem; font-size: 0.8rem; }
+  .recharts-legend-item svg { margin-right: 4px; }
   .meta { color: #6b7280; font-size: 0.875rem; margin: 0.25rem 0 0.75rem; }
   .separator { border: none; border-top: 1px solid #e5e7eb; margin: 2rem 0; }
   .header { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1.5rem; padding-bottom: 1rem; border-bottom: 2px solid #e5e7eb; }
@@ -165,8 +173,8 @@ function generateStandaloneHTML(runs: ExportableRun[]): string {
       body += '</p>\n';
     }
 
-    if (run.chartSvg) {
-      body += `<div class="chart-container">${run.chartSvg}</div>\n`;
+    if (run.chartHtml) {
+      body += `<div class="chart-container">${run.chartHtml}</div>\n`;
     }
 
     // Use renderMarkdown to get the analysis HTML, then strip Tailwind classes
