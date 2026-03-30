@@ -347,7 +347,25 @@ export async function analyzeResults(
   results: QueryResult,
   history?: ConversationTurn[]
 ): Promise<ReadableStream> {
-  const resultsPreview = results.rows.slice(0, 50);
+  // Send all rows if ≤ 200 (covers grouped analytics); smart sample for larger sets
+  const MAX_FULL_ROWS = 200;
+  const HEAD_ROWS = 100;
+  const TAIL_ROWS = 20;
+
+  let resultsPreview: Record<string, unknown>[];
+  let previewDescription: string;
+
+  if (results.rows.length <= MAX_FULL_ROWS) {
+    resultsPreview = results.rows;
+    previewDescription = `Query returned ${results.rowCount} rows. Here are all ${results.rowCount} rows:`;
+  } else {
+    const head = results.rows.slice(0, HEAD_ROWS);
+    const tail = results.rows.slice(-TAIL_ROWS);
+    resultsPreview = [...head, ...tail];
+    const omitted = results.rows.length - HEAD_ROWS - TAIL_ROWS;
+    previewDescription = `Query returned ${results.rowCount} rows. Showing first ${HEAD_ROWS} and last ${TAIL_ROWS} rows (${omitted} middle rows omitted):`;
+  }
+
   const resultsText = JSON.stringify(resultsPreview, null, 2);
 
   const userContent = `Original question: ${question}
@@ -357,7 +375,7 @@ SQL query executed:
 ${sql}
 \`\`\`
 
-Query returned ${results.rowCount} rows. Here are the first ${Math.min(results.rowCount, 50)} rows:
+${previewDescription}
 ${resultsText}
 
 Column names and types: ${results.columns.map((c, i) => `${c} (${results.columnTypes[i]})`).join(', ')}`;
