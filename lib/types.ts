@@ -112,7 +112,9 @@ export type AgentEvent =
   | { type: 'clarification'; content: string }
   | { type: 'needs_metadata'; content: string; question: string }
   | { type: 'metadata_ready'; tableCount: number }
-  | { type: 'progress'; content: string };
+  | { type: 'progress'; content: string }
+  | { type: 'tool_call'; step: number; tool: string; input: Record<string, unknown> }
+  | { type: 'tool_result'; step: number; tool: string; result: string; isError: boolean; executionTimeMs?: number; rowCount?: number };
 
 export interface ValidationResult {
   valid: boolean;

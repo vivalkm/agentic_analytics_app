@@ -1,4 +1,4 @@
-import { runAgentLoop } from '@/lib/agent-loop';
+import { runAgentLoopV2 } from '@/lib/agent-loop-v2';
 
 export async function POST(request: Request) {
   try {
@@ -34,7 +34,7 @@ export async function POST(request: Request) {
           .slice(0, 5)
       : undefined;
 
-    const stream = runAgentLoop(question, validHistory, validAttachments);
+    const stream = runAgentLoopV2(question, validHistory, validAttachments);
 
     return new Response(stream, {
       headers: {

@@ -363,14 +363,22 @@ export function findRelevantTables(
     const schemaName = table.schema.toLowerCase();
     const fqn = `${table.catalog}.${schemaName}.${tableName}`;
 
-    // Keyword matching
+    // Keyword matching (cap column matches to prevent wide-table score inflation)
+    const MAX_COL_MATCHES_PER_KEYWORD = 3;
     for (const keyword of keywords) {
       if (tableName.includes(keyword)) score += 10;
       if (schemaName.includes(keyword)) score += 5;
       if (table.comment?.toLowerCase().includes(keyword)) score += 8;
+      let colMatches = 0;
       for (const col of table.columns) {
-        if (col.name.toLowerCase().includes(keyword)) score += 3;
-        if (col.comment?.toLowerCase().includes(keyword)) score += 4;
+        if (colMatches >= MAX_COL_MATCHES_PER_KEYWORD) break;
+        const nameMatch = col.name.toLowerCase().includes(keyword);
+        const commentMatch = col.comment?.toLowerCase().includes(keyword);
+        if (nameMatch || commentMatch) {
+          if (nameMatch) score += 3;
+          if (commentMatch) score += 4;
+          colMatches++;
+        }
       }
     }
 
@@ -382,21 +390,39 @@ export function findRelevantTables(
 
     // Boost priority schemas/tables
     if (config.prioritySchemas.includes(schemaName)) {
-      score += 5;
+      score += 50;
     }
     const shortFqn = `${schemaName}.${tableName}`;
     if (config.priorityTables.includes(fqn) || config.priorityTables.includes(shortFqn)) {
-      score += 15;
+      score += 200;
     }
 
     return { table, score };
   });
 
-  return scored
+  const ranked = scored
     .filter((s) => s.score > 0)
-    .sort((a, b) => b.score - a.score)
-    .slice(0, maxTables)
-    .map((s) => s.table);
+    .sort((a, b) => b.score - a.score);
+
+  const topTables = ranked.slice(0, maxTables).map((s) => s.table);
+
+  // Guarantee priority tables are always included if they scored > 0
+  const topFqns = new Set(topTables.map((t) => `${t.catalog}.${t.schema}.${t.table}`));
+  for (const entry of ranked.slice(maxTables)) {
+    const entryFqn = `${entry.table.catalog}.${entry.table.schema}.${entry.table.table}`;
+    const entryShort = `${entry.table.schema}.${entry.table.table}`;
+    if (
+      config.priorityTables.includes(entryFqn) ||
+      config.priorityTables.includes(entryShort)
+    ) {
+      if (!topFqns.has(entryFqn)) {
+        topTables.push(entry.table);
+        topFqns.add(entryFqn);
+      }
+    }
+  }
+
+  return topTables;
 }
 
 export function getAllTables(): TableMetadata[] {

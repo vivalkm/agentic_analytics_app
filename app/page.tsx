@@ -32,6 +32,7 @@ import { cn } from '@/lib/utils';
 type AgentPhase =
   | 'idle'
   | 'generating'
+  | 'exploring'
   | 'executing'
   | 'validating'
   | 'retrying'
@@ -347,15 +348,15 @@ export default function Home() {
 
             switch (event.type) {
               case 'thinking': {
-                setAgentPhase(event.iteration > 1 ? 'retrying' : 'validating');
+                setAgentPhase('exploring');
                 setAgentIteration(event.iteration);
-                setStatusText(event.content);
+                setStatusText(event.content.slice(0, 80));
 
                 const existingThinkingId = thinkingCellIds[event.iteration];
                 if (existingThinkingId) {
-                  // Append to existing thinking cell for this iteration
+                  // Append to existing thinking cell — direct concat for streaming deltas
                   updateCell(existingThinkingId, (prev) => ({
-                    content: prev.content + '\n' + event.content,
+                    content: prev.content + event.content,
                   }));
                 } else {
                   const thinkingId = generateCellId();
@@ -588,6 +589,51 @@ export default function Home() {
                 break;
               }
 
+              case 'tool_call': {
+                setAgentPhase('exploring');
+                const toolLabel =
+                  event.tool === 'run_exploratory_query'
+                    ? `Running query: ${event.input.purpose ?? ''}\n\`\`\`sql\n${event.input.sql ?? ''}\n\`\`\``
+                    : event.tool === 'describe_table'
+                    ? `Examining table: ${event.input.schema}.${event.input.table}`
+                    : event.tool === 'list_tables'
+                    ? `Listing tables in ${event.input.schema}`
+                    : `${event.tool}`;
+                setStatusText(toolLabel.slice(0, 80));
+
+                const toolThinkingId = generateCellId();
+                thinkingCellIds[event.step + 1000] = toolThinkingId; // offset to avoid collision
+                addCell({
+                  id: toolThinkingId,
+                  type: 'thinking',
+                  content: toolLabel,
+                  timestamp: Date.now(),
+                  metadata: {
+                    agentRunId,
+                    iteration: event.step,
+                    collapsed: false,
+                  },
+                });
+                break;
+              }
+
+              case 'tool_result': {
+                const resultSummary = event.isError
+                  ? `Error: ${event.result}`
+                  : event.rowCount !== undefined
+                  ? `Got ${event.rowCount} rows (${event.executionTimeMs}ms)`
+                  : event.result.slice(0, 200);
+
+                // Append result summary to the matching tool_call thinking cell
+                const toolResultCellId = thinkingCellIds[event.step + 1000];
+                if (toolResultCellId) {
+                  updateCell(toolResultCellId, (prev) => ({
+                    content: prev.content + '\n\n' + (event.isError ? '**Error:** ' : '**Result:** ') + resultSummary,
+                  }));
+                }
+                break;
+              }
+
               case 'error': {
                 setStreamingSQL('');
                 addCell({
@@ -752,6 +798,7 @@ export default function Home() {
       text: agentIteration > 1 ? `Writing SQL (attempt ${agentIteration}/3)...` : 'Writing SQL...',
       color: 'text-blue-400',
     },
+    exploring: { icon: Search, text: statusText || 'Exploring data...', color: 'text-purple-400' },
     executing: { icon: Play, text: 'Running query...', color: 'text-amber-400' },
     validating: { icon: Search, text: 'Checking results...', color: 'text-purple-400' },
     retrying: {

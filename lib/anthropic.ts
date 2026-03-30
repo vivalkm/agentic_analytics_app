@@ -777,3 +777,115 @@ export function checkDateCompleteness(
 
   return null;
 }
+
+// ── Exploratory agent loop helpers ──
+
+/**
+ * Build the system prompt for the exploratory tool-use agent loop.
+ * Same domain rules and SQL conventions as generateSQL, but reframed
+ * for an agent that decides when to explore and when to answer.
+ */
+export function getExploratorySystemPrompt(
+  relevantTables: TableMetadata[],
+  relevantMetrics?: MetricEntry[],
+  relevantQueries?: QueryLibraryEntry[],
+  relevantGitHubQueries?: QueryLibraryEntry[],
+): string {
+  const today = new Date().toISOString().slice(0, 10);
+  const year = new Date().getFullYear();
+
+  let prompt = `You are a senior data analyst with access to a Trino data warehouse. You have tools to explore the database and run queries.
+
+APPROACH:
+1. Review the pre-loaded table metadata below to understand what's available.
+2. Use describe_table to inspect columns/types for tables you might query.
+3. Use run_exploratory_query to check DISTINCT values, date ranges, row counts, and data distributions BEFORE writing your final query.
+4. Once you understand the data well enough, call submit_final_query with your production-quality SQL.
+5. If the question is truly ambiguous, call ask_clarification.
+
+Today's date is ${today}. When the user refers to relative time periods ("this month", "this quarter", "last year", "in March") without specifying a year, always assume the CURRENT year (${year}) or use CURRENT_DATE-based expressions.
+DEFAULT TIME WINDOW: If the user's question does NOT mention any specific time period, default to the most recent 12 months (CURRENT_DATE - INTERVAL '12' MONTH to CURRENT_DATE). Always include an explicit date filter.
+
+REFERENCE PRIORITY (use in this order):
+1. **Metric catalog** (Statsig): If a matched metric definition is provided below, use its definition as the primary reference.
+2. **Query library**: If a matched reference query is provided below, adapt it.
+3. **Schema metadata**: Write SQL from scratch using available tables.
+
+SQL RULES:
+- ONLY generate SELECT or WITH (CTE) statements. Never generate data-modification SQL.
+- Always use fully qualified table names: lakehouse.schema.table
+- Prefer CTEs over subqueries for readability
+- Use Trino SQL syntax: DATE '2024-01-01' for date literals, CURRENT_DATE for today, INTERVAL expressions for date arithmetic
+- When asked about "month to date", "quarter to date", etc., use CURRENT_DATE - INTERVAL '1' DAY as the end date (today's data is incomplete)
+- IMPORTANT: Prefer actual transaction tables over forecast/outlook tables unless user explicitly asks about forecasts
+
+CRITICAL DEFAULT FILTERS — Core remittance:
+- \`customer_is_business = FALSE\` — excludes SMB. Only use TRUE if user asks about SMB/business customers.
+- \`txn_is_core = TRUE\` — excludes Rewire and non-core. Omit only if user asks about all transaction types or Rewire.
+
+FORECAST TABLES: For monthly forecast data, use \`fpa.fpa_fcst_latest\`. For daily forecast allocations, use \`fpa.fpa_fcst_latest_daily_ma\`.
+
+PAYMENT METHOD: Join \`lakehouse.public.payment_profile_dimension\` using \`payment_profile_key = transaction_payment_profile_key\`. Column: \`payment_instrument_type\`. Do NOT use \`payment_route_dimension\`.
+
+EXPLORATION GUIDELINES:
+- Keep exploratory queries fast: always use LIMIT, target small result sets
+- Check DISTINCT values of filter columns before applying filters you're unsure about
+- Verify date ranges with MIN/MAX queries before writing the final query
+- If an exploratory query returns an error, investigate and try a different approach
+- You typically need 2-5 exploratory queries before submitting the final answer`;
+
+  // Add metric context
+  const metrics = relevantMetrics ?? [];
+  if (metrics.length > 0) {
+    prompt += '\n\nMatched metric definitions from Statsig catalog (priority 1):';
+    for (const m of metrics) {
+      prompt += `\n\n### ${m.name}\n${m.description}`;
+      if (m.kind === 'derived') {
+        const agg = (m.aggregation || 'count').toUpperCase();
+        const col = m.valueColumn || '*';
+        let formula = `${agg}(${col})`;
+        if (m.sourceName) formula += ` FROM ${m.sourceName}`;
+        if (m.criteria && m.criteria.length > 0) {
+          formula += ` WHERE ${m.criteria.map((c) => `${c.column} ${c.condition} ${c.values.join(', ')}`).join(' AND ')}`;
+        }
+        prompt += `\nDefinition: ${formula}`;
+      }
+      if (m.sql) prompt += `\nBacking SQL:\n\`\`\`sql\n${m.sql}\n\`\`\``;
+    }
+  }
+
+  // Add query library context
+  const queries = relevantQueries ?? [];
+  if (queries.length > 0) {
+    prompt += '\n\nMatched reference queries from local query library (priority 2):';
+    for (const q of queries) {
+      prompt += `\n\n-- ${q.description}\n${q.sql}`;
+    }
+  }
+
+  // Add GitHub query context
+  const ghQueries = relevantGitHubQueries ?? [];
+  if (ghQueries.length > 0) {
+    prompt += '\n\nMatched reference queries from shared repo (priority 3):';
+    for (const q of ghQueries) {
+      prompt += `\n\n-- ${q.description}\n${q.sql}`;
+    }
+  }
+
+  // Add table metadata
+  if (relevantTables.length > 0) {
+    prompt += '\n\nPre-loaded table metadata (tables most likely relevant to the question):\n';
+    prompt += buildTableContext(relevantTables);
+  }
+
+  // Add domain context
+  const domain = getDomainContext();
+  if (domain) {
+    prompt += `\n\n--- CRITICAL DOMAIN RULES (override any assumptions) ---\n${domain}`;
+  }
+
+  return prompt;
+}
+
+/** Re-export for use by agent-loop-v2 */
+export { getClient, getModel, buildHistoryMessages, buildUserContent, ANALYSIS_SYSTEM_PROMPT };
