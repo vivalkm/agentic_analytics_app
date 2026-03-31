@@ -1,7 +1,7 @@
 import { writeFileSync, readFileSync, mkdirSync, renameSync } from 'fs';
 import { join } from 'path';
 import { TableMetadata, MetadataCache } from './types';
-import { listSchemas, listTables, describeTable, describeSchemaColumns, getTableComments } from './trino-mcp';
+import { listSchemas, listTables, describeTable, describeSchemaColumns, getTableComments } from './trino';
 import { extractKeywords } from './stop-words';
 
 // --- Disk persistence ---

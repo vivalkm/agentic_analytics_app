@@ -104,6 +104,11 @@ async function githubFetch(apiPath: string): Promise<unknown> {
 
   const res = await fetch(`https://api.github.com${apiPath}`, { headers });
   if (!res.ok) {
+    // Don't throw noisy stack traces when token is simply not configured
+    if (!token && (res.status === 401 || res.status === 403 || res.status === 404)) {
+      console.warn(`[github-queries] Skipping — no GITHUB_TOKEN set (${res.status} from ${apiPath})`);
+      return [];
+    }
     throw new Error(
       `GitHub API ${apiPath} returned ${res.status}: ${await res.text()}`
     );

@@ -1,5 +1,5 @@
 import { validateSQL } from '@/lib/sql-validator';
-import { executeTrinoMCP } from '@/lib/trino-mcp';
+import { executeTrinoMCP } from '@/lib/trino';
 
 export async function POST(request: Request) {
   try {

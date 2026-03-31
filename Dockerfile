@@ -19,14 +19,10 @@ ENV NODE_ENV=production
 ENV HOSTNAME=0.0.0.0
 ENV PORT=3000
 
-# Install uv (for Trino MCP subprocess)
-RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates git && \
-    curl -LsSf https://astral.sh/uv/install.sh | sh && \
+# Install Python + Trino client for query execution
+RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-pip && \
+    python3 -m pip install --break-system-packages trino && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
-ENV PATH="/root/.local/bin:$PATH"
-
-# Pre-warm Trino MCP dependencies so first query is fast
-RUN uvx --from 'git+https://github.com/Remitly/toolbox.git#subdirectory=trino' trino-mcp --help || true
 
 # Copy standalone output
 COPY --from=builder /app/.next/standalone ./
@@ -36,6 +32,7 @@ COPY --from=builder /app/public ./public
 # Copy app assets needed at runtime
 COPY --from=builder /app/query-library ./query-library
 COPY --from=builder /app/domain-context.md ./domain-context.md
+COPY --from=builder /app/scripts ./scripts
 
 # Create cache directory
 RUN mkdir -p .cache

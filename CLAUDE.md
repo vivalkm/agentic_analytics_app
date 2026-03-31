@@ -45,7 +45,7 @@ Hex-like notebook app: natural language question → exploratory tool-use agent 
   - `submit_final_query` — production-quality answer SQL (exits loop)
   - `ask_clarification` — ask user a follow-up (exits loop)
 - All queries validated read-only via `lib/sql-validator.ts` (regex + AST)
-- All queries executed via `lib/trino-mcp.ts` (MCP subprocess, JSON-RPC over stdio)
+- All queries executed via `lib/trino.ts` (spawns `python3 scripts/trino-query.py`)
 
 **Phase 3 — Analysis** (streamed):
 - `analyzeResults()` sends question + SQL + results to Claude for markdown analysis
@@ -75,7 +75,7 @@ When the LLM generates SQL, context is provided in this order:
 | `lib/agent-loop-v2.ts` | Core orchestrator — agentic tool-use loop |
 | `lib/agent-tools.ts` | 5 tool definitions + execution handlers |
 | `lib/anthropic.ts` | LLM calls, system prompts, analysis, streaming |
-| `lib/trino-mcp.ts` | MCP subprocess client, SQL execution, metadata tools |
+| `lib/trino.ts` | Trino query execution via Python subprocess (`scripts/trino-query.py`) |
 | `lib/metadata.ts` | Schema introspection with two-tier cache (`globalThis` + disk) |
 | `lib/sql-validator.ts` | Read-only SQL enforcement (regex + AST via node-sql-parser) |
 | `lib/statsig.ts` | Statsig Console API client |
@@ -109,7 +109,7 @@ When the LLM generates SQL, context is provided in this order:
 
 **Query library convention**: SQL files in `query-library/` use a header block: `-- description` marker, multi-line description, optional `-- tags: ...`, separator `-- ------------`.
 
-**Trino MCP**: Spawns `uvx --from git+https://github.com/Remitly/toolbox.git#subdirectory=trino trino-mcp` as a child process. Singleton client, 300s timeout per tool call. SHOW/DESCRIBE statements route to dedicated MCP metadata tools to avoid LIMIT-appending issues.
+**Trino execution**: Queries are executed by spawning `python3 scripts/trino-query.py` with SQL piped to stdin. The script connects via `trino` PyPI package with OAuth2 authentication and returns JSON on stdout. No persistent connection — stateless per query. 300s timeout. Metadata helpers (`listSchemas`, `describeTable`, etc.) are SQL wrappers around the same execution path.
 
 ## Environment Variables
 
@@ -118,8 +118,9 @@ When the LLM generates SQL, context is provided in this order:
 | `ANTHROPIC_API_KEY` | Yes | Anthropic API key (via LLM gateway) |
 | `ANTHROPIC_BASE_URL` | Yes | LLM gateway URL |
 | `ANTHROPIC_MODEL` | No | Model ID override |
-| `TRINO_ENVIRONMENT` | No | `prod` or `preprod` (default: `prod`) |
-| `TRINO_DEFAULT_CATALOG` | No | Catalog to introspect (default: `lakehouse`) |
+| `TRINO_HOST` | No | Trino coordinator URL (default: `https://lakehouse-router-prod.us-west-2.remitly.com`) |
+| `TRINO_PORT` | No | Trino port (default: `443`) |
+| `TRINO_CATALOG` | No | Catalog to query (default: `lakehouse`) |
 | `TRINO_PRIORITY_SCHEMAS` | No | Comma-separated schemas loaded first |
 | `TRINO_PRIORITY_TABLES` | No | Comma-separated FQNs with highest relevance boost |
 | `STATSIG_CONSOLE_API_KEY` | No | Statsig Console API key for metric sync |

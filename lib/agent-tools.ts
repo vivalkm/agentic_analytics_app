@@ -1,7 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { QueryResult, TableMetadata } from './types';
 import { validateSQL } from './sql-validator';
-import { executeTrinoMCP, describeTable, listTables as listTablesMCP } from './trino-mcp';
+import { executeTrinoMCP, describeTable, listTables as listTablesMCP } from './trino';
 import { getMetadataCache } from './metadata';
 
 // ── Tool definitions for the Anthropic tool-use API ──
