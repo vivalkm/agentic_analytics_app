@@ -225,18 +225,6 @@ export default function Home() {
     []
   );
 
-  // Mark all thinking/intermediate cells in a run as collapsed
-  const collapseThinkingCells = useCallback((agentRunId: string) => {
-    setCells((prev) =>
-      prev.map((c) => {
-        if (c.metadata?.agentRunId !== agentRunId) return c;
-        if (c.type === 'thinking') {
-          return { ...c, metadata: { ...c.metadata, collapsed: true } };
-        }
-        return c;
-      })
-    );
-  }, []);
 
   /**
    * Stream the agent response, processing NDJSON events into cells.
@@ -290,9 +278,9 @@ export default function Home() {
       setAgentPhase('generating');
       setStreamingSQL('');
 
-      // Track cell IDs per iteration for updating
+      // Track cell IDs for updating
       const sqlCellIds: Record<number, string> = {};
-      const thinkingCellIds: Record<number, string> = {};
+      let thinkingCellId: string | null = null;
       let analysisCellId: string | null = null;
       let analysisText = '';
       let latestResultsCellId: string | null = null;
@@ -350,25 +338,19 @@ export default function Home() {
                 setAgentPhase('exploring');
                 setStatusText(event.content.slice(0, 80));
 
-                const existingThinkingId = thinkingCellIds[event.iteration];
-                if (existingThinkingId) {
-                  // Append to existing thinking cell — direct concat for streaming deltas
-                  updateCell(existingThinkingId, (prev) => ({
+                if (thinkingCellId) {
+                  // Append to unified thinking cell
+                  updateCell(thinkingCellId, (prev) => ({
                     content: prev.content + event.content,
                   }));
                 } else {
-                  const thinkingId = generateCellId();
-                  thinkingCellIds[event.iteration] = thinkingId;
+                  thinkingCellId = generateCellId();
                   addCell({
-                    id: thinkingId,
+                    id: thinkingCellId,
                     type: 'thinking',
                     content: event.content,
                     timestamp: Date.now(),
-                    metadata: {
-                      agentRunId,
-                      iteration: event.iteration,
-                      collapsed: false,
-                    },
+                    metadata: { agentRunId, collapsed: false },
                   });
                 }
                 break;
@@ -457,35 +439,15 @@ export default function Home() {
               }
 
               case 'validation': {
-                // Update the most recent thinking cell for this iteration
-                setCells((prev) => {
-                  const thinkingCell = [...prev]
-                    .reverse()
-                    .find(
-                      (c) =>
-                        c.type === 'thinking' &&
-                        c.metadata?.agentRunId === agentRunId &&
-                        c.metadata?.iteration === event.iteration
-                    );
-                  if (thinkingCell) {
-                    return prev.map((c) =>
-                      c.id === thinkingCell.id
-                        ? {
-                            ...c,
-                            metadata: {
-                              ...c.metadata,
-                              validationResult: {
-                                valid: event.valid,
-                                reason: event.reason,
-                                suggestion: event.suggestion,
-                              },
-                            },
-                          }
-                        : c
-                    );
-                  }
-                  return prev;
-                });
+                // Append validation result to the unified thinking cell
+                if (thinkingCellId) {
+                  const validationText = event.valid
+                    ? '\n\n✓ Results validated'
+                    : `\n\n⚠ ${event.reason}${event.suggestion ? '\nSuggestion: ' + event.suggestion : ''}`;
+                  updateCell(thinkingCellId, (prev) => ({
+                    content: prev.content + validationText,
+                  }));
+                }
                 break;
               }
 
@@ -531,9 +493,9 @@ export default function Home() {
                   analysisText = cleaned;
                 }
 
-                // If there were multiple iterations, collapse thinking steps
-                if (event.iterations > 1) {
-                  collapseThinkingCells(agentRunId);
+                // Collapse the unified thinking cell
+                if (thinkingCellId) {
+                  updateCellMetadata(thinkingCellId, { collapsed: true });
                 }
                 break;
               }
@@ -586,19 +548,20 @@ export default function Home() {
                     : `${event.tool}`;
                 setStatusText(toolLabel.slice(0, 80));
 
-                const toolThinkingId = generateCellId();
-                thinkingCellIds[event.step + 1000] = toolThinkingId; // offset to avoid collision
-                addCell({
-                  id: toolThinkingId,
-                  type: 'thinking',
-                  content: toolLabel,
-                  timestamp: Date.now(),
-                  metadata: {
-                    agentRunId,
-                    iteration: event.step,
-                    collapsed: false,
-                  },
-                });
+                if (thinkingCellId) {
+                  updateCell(thinkingCellId, (prev) => ({
+                    content: prev.content + '\n\n---\n\n' + toolLabel,
+                  }));
+                } else {
+                  thinkingCellId = generateCellId();
+                  addCell({
+                    id: thinkingCellId,
+                    type: 'thinking',
+                    content: toolLabel,
+                    timestamp: Date.now(),
+                    metadata: { agentRunId, collapsed: false },
+                  });
+                }
                 break;
               }
 
@@ -609,11 +572,9 @@ export default function Home() {
                   ? `Got ${event.rowCount} rows (${event.executionTimeMs}ms)`
                   : event.result.slice(0, 200);
 
-                // Append result summary to the matching tool_call thinking cell
-                const toolResultCellId = thinkingCellIds[event.step + 1000];
-                if (toolResultCellId) {
-                  updateCell(toolResultCellId, (prev) => ({
-                    content: prev.content + '\n\n' + (event.isError ? '**Error:** ' : '**Result:** ') + resultSummary,
+                if (thinkingCellId) {
+                  updateCell(thinkingCellId, (prev) => ({
+                    content: prev.content + '\n' + (event.isError ? '**Error:** ' : '**Result:** ') + resultSummary,
                   }));
                 }
                 break;
@@ -691,7 +652,7 @@ export default function Home() {
         }
       }
     },
-    [addCell, updateCell, updateCellMetadata, collapseThinkingCells]
+    [addCell, updateCell, updateCellMetadata]
   );
 
   /**
@@ -1032,9 +993,7 @@ export default function Home() {
                   <ThinkingStep
                     content={cell.content}
                     collapsed={cell.metadata?.collapsed || false}
-                    validationResult={cell.metadata?.validationResult}
-                    intermediateSQL={cell.metadata?.sql}
-                    inProgress={!cell.metadata?.validationResult && agentPhase !== 'idle'}
+                    inProgress={agentPhase !== 'idle' && agentPhase !== 'analyzing'}
                   />
                 )}
 

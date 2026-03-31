@@ -1,18 +1,16 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
 } from '@radix-ui/react-collapsible';
-import { ChevronRight, Brain, AlertTriangle, CheckCircle2, Loader2 } from 'lucide-react';
+import { ChevronRight, Brain, Loader2 } from 'lucide-react';
 
 interface ThinkingStepProps {
   content: string;
   collapsed: boolean;
-  validationResult?: { valid: boolean; reason: string; suggestion?: string };
-  intermediateSQL?: string;
   /** When true, shows a spinning loader instead of the static Brain icon */
   inProgress?: boolean;
 }
@@ -20,34 +18,36 @@ interface ThinkingStepProps {
 export function ThinkingStep({
   content,
   collapsed: initialCollapsed,
-  validationResult,
-  intermediateSQL,
   inProgress = false,
 }: ThinkingStepProps) {
   const [open, setOpen] = useState(!initialCollapsed);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const userScrolledUp = useRef(false);
 
-  // Build a one-line summary
-  const summary = validationResult
-    ? validationResult.valid
-      ? 'Results validated'
-      : validationResult.reason.slice(0, 100) + (validationResult.reason.length > 100 ? '...' : '')
-    : content.slice(0, 100) + (content.length > 100 ? '...' : '');
+  // Auto-scroll to bottom when new content arrives (unless user scrolled up)
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el || userScrolledUp.current) return;
+    el.scrollTop = el.scrollHeight;
+  }, [content]);
 
-  const StatusIcon = validationResult
-    ? validationResult.valid
-      ? CheckCircle2
-      : AlertTriangle
-    : inProgress
-      ? Loader2
-      : Brain;
+  const handleScroll = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    // If user is within 40px of bottom, consider them "following"
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+    userScrolledUp.current = !atBottom;
+  }, []);
 
-  const iconColor = validationResult
-    ? validationResult.valid
-      ? 'text-green-500'
-      : 'text-amber-500'
-    : 'text-blue-400';
+  // Collapse when agent finishes (prop changes from false to true)
+  useEffect(() => {
+    if (initialCollapsed) setOpen(false);
+  }, [initialCollapsed]);
 
-  const iconSpin = inProgress && !validationResult ? 'animate-spin' : '';
+  const StatusIcon = inProgress ? Loader2 : Brain;
+  const iconColor = 'text-blue-400';
+  const iconSpin = inProgress ? 'animate-spin' : '';
+  const summary = inProgress ? 'Thinking...' : 'Exploration complete';
 
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
@@ -59,32 +59,15 @@ export function ThinkingStep({
         <span className="truncate">{summary}</span>
       </CollapsibleTrigger>
       <CollapsibleContent>
-        <div className="ml-4 border-l border-border/30 pl-4 pt-2 pb-1 space-y-2">
-          {/* Only show full content if it's longer than the truncated summary */}
-          {content.length > 100 && (
-            <p className="text-base text-muted-foreground whitespace-pre-wrap">
-              {content}
-            </p>
-          )}
-
-          {validationResult && !validationResult.valid && (
-            <div className="rounded border border-amber-500/20 bg-amber-500/5 px-3 py-2 text-base">
-              <p className="font-medium text-amber-400">Issue detected</p>
-              <p className="mt-1 text-muted-foreground">{validationResult.reason}</p>
-              {validationResult.suggestion && (
-                <p className="mt-1 text-muted-foreground">
-                  <span className="font-medium">Suggestion:</span>{' '}
-                  {validationResult.suggestion}
-                </p>
-              )}
-            </div>
-          )}
-
-          {intermediateSQL && (
-            <pre className="rounded bg-zinc-900 p-2 text-base text-zinc-400 overflow-x-auto">
-              <code>{intermediateSQL}</code>
-            </pre>
-          )}
+        <div
+          ref={scrollRef}
+          onScroll={handleScroll}
+          className="ml-4 border-l border-border/30 pl-4 pt-2 pb-1 overflow-y-auto"
+          style={{ maxHeight: '50vh' }}
+        >
+          <p className="text-base text-muted-foreground whitespace-pre-wrap">
+            {content}
+          </p>
         </div>
       </CollapsibleContent>
     </Collapsible>
