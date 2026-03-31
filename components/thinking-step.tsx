@@ -10,7 +10,6 @@ import { ChevronRight, Brain, AlertTriangle, CheckCircle2, Loader2 } from 'lucid
 
 interface ThinkingStepProps {
   content: string;
-  iteration: number;
   collapsed: boolean;
   validationResult?: { valid: boolean; reason: string; suggestion?: string };
   intermediateSQL?: string;
@@ -20,7 +19,6 @@ interface ThinkingStepProps {
 
 export function ThinkingStep({
   content,
-  iteration,
   collapsed: initialCollapsed,
   validationResult,
   intermediateSQL,
@@ -31,9 +29,9 @@ export function ThinkingStep({
   // Build a one-line summary
   const summary = validationResult
     ? validationResult.valid
-      ? `Attempt ${iteration}: Results validated`
-      : `Attempt ${iteration}: ${validationResult.reason.slice(0, 80)}${validationResult.reason.length > 80 ? '...' : ''}`
-    : `Attempt ${iteration}: ${content.slice(0, 80)}${content.length > 80 ? '...' : ''}`;
+      ? 'Results validated'
+      : validationResult.reason.slice(0, 100) + (validationResult.reason.length > 100 ? '...' : '')
+    : content.slice(0, 100) + (content.length > 100 ? '...' : '');
 
   const StatusIcon = validationResult
     ? validationResult.valid
@@ -63,7 +61,7 @@ export function ThinkingStep({
       <CollapsibleContent>
         <div className="ml-4 border-l border-border/30 pl-4 pt-2 pb-1 space-y-2">
           {/* Only show full content if it's longer than the truncated summary */}
-          {content.length > 80 && (
+          {content.length > 100 && (
             <p className="text-base text-muted-foreground whitespace-pre-wrap">
               {content}
             </p>

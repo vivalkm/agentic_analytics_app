@@ -78,7 +78,7 @@ function buildHistory(cells: NotebookCell[], maxTurns = 10): ConversationTurn[] 
 export default function Home() {
   const [cells, setCells] = useState<NotebookCell[]>([]);
   const [agentPhase, setAgentPhase] = useState<AgentPhase>('idle');
-  const [agentIteration, setAgentIteration] = useState(1);
+
   const [streamingSQL, setStreamingSQL] = useState('');
   const [isExecuting, setIsExecuting] = useState(false); // For manual re-runs
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -230,7 +230,7 @@ export default function Home() {
     setCells((prev) =>
       prev.map((c) => {
         if (c.metadata?.agentRunId !== agentRunId) return c;
-        if (c.type === 'thinking' || c.metadata?.isIntermediate) {
+        if (c.type === 'thinking') {
           return { ...c, metadata: { ...c.metadata, collapsed: true } };
         }
         return c;
@@ -288,7 +288,6 @@ export default function Home() {
       });
 
       setAgentPhase('generating');
-      setAgentIteration(1);
       setStreamingSQL('');
 
       // Track cell IDs per iteration for updating
@@ -349,7 +348,6 @@ export default function Home() {
             switch (event.type) {
               case 'thinking': {
                 setAgentPhase('exploring');
-                setAgentIteration(event.iteration);
                 setStatusText(event.content.slice(0, 80));
 
                 const existingThinkingId = thinkingCellIds[event.iteration];
@@ -379,7 +377,6 @@ export default function Home() {
               case 'sql_start': {
                 // Start streaming SQL generation
                 setAgentPhase('generating');
-                setAgentIteration(event.iteration);
                 setStatusText('');
                 setStreamingSQL('');
                 break;
@@ -395,14 +392,6 @@ export default function Home() {
                 // SQL generation complete — clear streaming state
                 setStreamingSQL('');
                 setAgentPhase('executing');
-                setAgentIteration(event.iteration);
-
-                // Mark previous iteration's SQL as intermediate
-                for (const [iter, cellId] of Object.entries(sqlCellIds)) {
-                  if (Number(iter) < event.iteration) {
-                    updateCellMetadata(cellId, { isIntermediate: true });
-                  }
-                }
 
                 const existingSqlId = sqlCellIds[event.iteration];
                 if (existingSqlId) {
@@ -450,10 +439,6 @@ export default function Home() {
                 const chartConfig = detectChartType(results, question);
                 const resultsCellId = generateCellId();
 
-                // Mark previous results cells as intermediate
-                if (latestResultsCellId) {
-                  updateCellMetadata(latestResultsCellId, { isIntermediate: true });
-                }
                 latestResultsCellId = resultsCellId;
 
                 addCell({
@@ -795,7 +780,7 @@ export default function Home() {
     idle: { icon: Loader2, text: '', color: '' },
     generating: {
       icon: Sparkles,
-      text: agentIteration > 1 ? `Writing SQL (attempt ${agentIteration}/3)...` : 'Writing SQL...',
+      text: 'Writing SQL...',
       color: 'text-blue-400',
     },
     exploring: { icon: Search, text: statusText || 'Exploring data...', color: 'text-purple-400' },
@@ -803,7 +788,7 @@ export default function Home() {
     validating: { icon: Search, text: 'Checking results...', color: 'text-purple-400' },
     retrying: {
       icon: Loader2,
-      text: `Trying different approach (attempt ${agentIteration}/3)...`,
+      text: 'Refining approach...',
       color: 'text-amber-400',
     },
     analyzing: { icon: CheckCircle2, text: 'Analyzing results...', color: 'text-green-400' },
@@ -1030,10 +1015,6 @@ export default function Home() {
 
           {cells.map((cell) => {
             // Hide intermediate cells when collapsed
-            if (cell.metadata?.isIntermediate && cell.metadata?.collapsed) {
-              return null;
-            }
-
             return (
               <div key={cell.id}>
                 {cell.type === 'question' && (
@@ -1050,7 +1031,6 @@ export default function Home() {
                 {cell.type === 'thinking' && (
                   <ThinkingStep
                     content={cell.content}
-                    iteration={cell.metadata?.iteration || 1}
                     collapsed={cell.metadata?.collapsed || false}
                     validationResult={cell.metadata?.validationResult}
                     intermediateSQL={cell.metadata?.sql}
@@ -1058,7 +1038,7 @@ export default function Home() {
                   />
                 )}
 
-                {cell.type === 'sql' && !cell.metadata?.isIntermediate && (
+                {cell.type === 'sql' && (
                   <SQLEditor
                     sql={
                       cell.metadata?.sql || cell.content
@@ -1079,7 +1059,6 @@ export default function Home() {
                 )}
 
                 {cell.type === 'results' &&
-                  !cell.metadata?.isIntermediate &&
                   cell.metadata?.results && (
                     <div className="space-y-3">
                       <div className="flex items-center gap-2 px-1">
@@ -1107,7 +1086,6 @@ export default function Home() {
                   <AnalysisCard
                     analysis={cell.content}
                     streaming={agentPhase === 'analyzing'}
-                    iterations={cell.metadata?.iteration}
                     onFollowUp={streamAgentResponse}
                   />
                 )}

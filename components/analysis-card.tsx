@@ -2,14 +2,13 @@
 
 import { useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
+
 import { Button } from '@/components/ui/button';
 import { Sparkles, Loader2, Play } from 'lucide-react';
 
 interface AnalysisCardProps {
   analysis: string;
   streaming?: boolean;
-  iterations?: number;
   onFollowUp?: (question: string) => void;
 }
 
@@ -207,7 +206,6 @@ export function renderMarkdown(text: string): string {
 export function AnalysisCard({
   analysis,
   streaming = false,
-  iterations,
   onFollowUp,
 }: AnalysisCardProps) {
   const { body, questions } = useMemo(
@@ -223,11 +221,6 @@ export function AnalysisCard({
           Analysis
           {streaming && (
             <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
-          )}
-          {!streaming && iterations && iterations > 1 && (
-            <Badge variant="outline" className="text-xs px-1.5 py-0 font-normal text-muted-foreground">
-              Resolved after {iterations} attempts
-            </Badge>
           )}
         </CardTitle>
       </CardHeader>
