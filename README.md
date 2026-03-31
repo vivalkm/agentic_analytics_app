@@ -27,7 +27,8 @@ The agent loop retries up to 3 times, automatically fixing SQL errors and valida
 
 ### Prerequisites
 
-- [Docker Desktop](https://www.docker.com/products/docker-desktop/)
+- Node.js 22+
+- Python 3 with the `trino` package (`pip install trino`)
 - An Anthropic API key (direct or via LLM gateway)
 
 ### Setup
@@ -38,27 +39,28 @@ The agent loop retries up to 3 times, automatically fixing SQL errors and valida
    cd agentic_analytics_app
    ```
 
-2. Create your environment file:
+2. Install dependencies:
+   ```bash
+   npm install
+   ```
+
+3. Create your environment file:
    ```bash
    cp .env.local.example .env.local
    ```
 
-3. Edit `.env.local` and add your Anthropic API key:
+4. Edit `.env.local` and add your Anthropic API key:
    ```env
    ANTHROPIC_API_KEY=your-api-key
    ```
    All other settings (Trino, Statsig, GitHub) are pre-configured with defaults.
 
-4. Start the app:
+5. Start the dev server:
    ```bash
-   docker compose up --build
+   npm run dev
    ```
 
-5. Open [http://localhost:3000](http://localhost:3000)
-
-On subsequent runs, just `docker compose up` (no `--build` needed unless code changes).
-
-To stop: `docker compose down`
+6. Open [http://localhost:3000](http://localhost:3000)
 
 ## Project Structure
 

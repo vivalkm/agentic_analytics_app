@@ -1,9 +1,0 @@
-node_modules
-.next
-.cache
-.git
-.env*
-!.env.local.example
-*.md
-!README.md
-!domain-context.md

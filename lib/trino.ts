@@ -11,7 +11,7 @@ function assertIdentifier(value: string, label: string): void {
   }
 }
 
-/** Resolve Python binary: prefer project .venv (local dev), fall back to system python3 (Docker). */
+/** Resolve Python binary: prefer project .venv, fall back to system python3. */
 function getPython(): string {
   const venvPython = join(process.cwd(), '.venv', 'bin', 'python');
   return existsSync(venvPython) ? venvPython : 'python3';
