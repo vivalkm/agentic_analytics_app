@@ -421,14 +421,24 @@ export function runAgentLoopV2(
           const { chartConfig } = parseChartConfigFromAnalysis(fullAnalysis);
           let validChartConfig = chartConfig;
 
-          // Validate chart config keys against actual result columns
+          // Validate and normalize chart config keys to match actual column names (case-sensitive)
           if (validChartConfig && validChartConfig.type !== 'none') {
-            const colSet = new Set(results.columns.map((c: string) => c.toLowerCase()));
-            const xValid = colSet.has(validChartConfig.xKey.toLowerCase());
-            const yValid = validChartConfig.yKeys.some((k) => colSet.has(k.toLowerCase()));
-            if (!xValid || !yValid) {
-              // Fall back to heuristic
+            const colMap = new Map(results.columns.map((c: string) => [c.toLowerCase(), c]));
+            const xActual = colMap.get(validChartConfig.xKey.toLowerCase());
+            const yActuals = validChartConfig.yKeys
+              .map((k) => colMap.get(k.toLowerCase()))
+              .filter((k): k is string => !!k);
+            if (!xActual || yActuals.length === 0) {
               validChartConfig = detectChartType(results);
+            } else {
+              validChartConfig = {
+                ...validChartConfig,
+                xKey: xActual,
+                yKeys: yActuals,
+                ...(validChartConfig.groupKey
+                  ? { groupKey: colMap.get(validChartConfig.groupKey.toLowerCase()) || validChartConfig.groupKey }
+                  : {}),
+              };
             }
           }
 

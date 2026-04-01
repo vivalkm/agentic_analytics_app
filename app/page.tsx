@@ -340,7 +340,6 @@ export default function Home() {
             switch (event.type) {
               case 'thinking': {
                 setAgentPhase('exploring');
-                setStatusText(event.content.slice(0, 80));
 
                 if (thinkingCellId) {
                   // Append to unified thinking cell
