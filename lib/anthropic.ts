@@ -853,6 +853,12 @@ EXPLORATION GUIDELINES:
 - If an exploratory query returns an error, investigate and try a different approach
 - You typically need 2-5 exploratory queries before submitting the final answer`;
 
+  // Add domain context EARLY — these rules override everything
+  const domain = getDomainContext();
+  if (domain) {
+    prompt += `\n\n--- CRITICAL DOMAIN RULES (override any assumptions) ---\n${domain}`;
+  }
+
   // Add metric context — compact grouped list (names only, call get_metric_sql for details)
   const metrics = relevantMetrics ?? [];
   if (metrics.length > 0) {
@@ -892,12 +898,6 @@ EXPLORATION GUIDELINES:
   if (relevantTables.length > 0) {
     prompt += '\n\nPre-loaded table metadata (tables most likely relevant to the question):\n';
     prompt += buildTableContext(relevantTables);
-  }
-
-  // Add domain context
-  const domain = getDomainContext();
-  if (domain) {
-    prompt += `\n\n--- CRITICAL DOMAIN RULES (override any assumptions) ---\n${domain}`;
   }
 
   return prompt;
