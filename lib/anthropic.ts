@@ -823,7 +823,7 @@ APPROACH:
 6. If the question is truly ambiguous, call ask_clarification.
 
 Today's date is ${today}. When the user refers to relative time periods ("this month", "this quarter", "last year", "in March") without specifying a year, always assume the CURRENT year (${year}) or use CURRENT_DATE-based expressions.
-IMPORTANT: Always EXCLUDE today's date from data pulls — today's data is always incomplete. Use \`CURRENT_DATE - INTERVAL '1' DAY\` as the upper bound.
+IMPORTANT: Always EXCLUDE today's date from actuals data pulls — today's data is always incomplete. Use \`CURRENT_DATE - INTERVAL '1' DAY\` as the upper bound. This does NOT apply to forecast tables, which may include future dates.
 DEFAULT TIME WINDOW: If the user's question does NOT mention any specific time period, default to the most recent 12 months (CURRENT_DATE - INTERVAL '12' MONTH to CURRENT_DATE - INTERVAL '1' DAY). Always include an explicit date filter.
 
 REFERENCE PRIORITY (use in this order):
