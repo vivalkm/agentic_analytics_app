@@ -129,6 +129,20 @@ export function ensureMetricsLoading(): Promise<void> {
 }
 
 /**
+ * Look up metrics by name (case-insensitive). Returns full MetricEntry
+ * including SQL for the matched metrics.
+ */
+export function getMetricsByName(names: string[]): MetricEntry[] {
+  const metrics = getMetricCatalog();
+  if (metrics.length === 0 || names.length === 0) return [];
+
+  const lowerNames = names.map((n) => n.toLowerCase().trim());
+  return metrics.filter((m) =>
+    lowerNames.some((n) => m.name.toLowerCase() === n || m.name.toLowerCase().includes(n) || n.includes(m.name.toLowerCase()))
+  );
+}
+
+/**
  * Match metrics against a user question using keyword scoring.
  * Same pattern as query-matcher's matchQueries.
  */

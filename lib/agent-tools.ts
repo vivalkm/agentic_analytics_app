@@ -3,6 +3,7 @@ import { QueryResult, TableMetadata } from './types';
 import { validateSQL } from './sql-validator';
 import { executeTrinoMCP, describeTable, listTables as listTablesMCP } from './trino';
 import { getMetadataCache } from './metadata';
+import { getMetricsByName } from './metric-catalog';
 
 // ── Tool definitions for the Anthropic tool-use API ──
 
@@ -94,6 +95,22 @@ export const TOOL_DEFINITIONS: Anthropic.Messages.Tool[] = [
       required: ['question'],
     },
   },
+  {
+    name: 'get_metric_sql',
+    description:
+      'Get the full backing SQL and detailed definitions for specific Statsig metrics. Call this EARLY (as your first tool call) when you identify relevant metrics from the metric catalog in the system prompt. The returned SQL shows exactly how each metric is calculated and which tables/columns to use — this saves you from exploring tables from scratch.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        metric_names: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Array of metric names to look up (e.g. ["Revenue", "Active Users"]). Names are matched case-insensitively.',
+        },
+      },
+      required: ['metric_names'],
+    },
+  },
 ];
 
 // ── Tool execution ──
@@ -143,6 +160,9 @@ export async function executeTool(
         isError: false,
         metadata: { type: 'clarification', question: String(input.question) },
       };
+
+    case 'get_metric_sql':
+      return executeGetMetricSQL(input as { metric_names: string[] });
 
     default:
       return { result: `Unknown tool: ${name}`, isError: true };
@@ -308,6 +328,42 @@ async function executeSubmitFinalQuery(
       isError: true,
     };
   }
+}
+
+function executeGetMetricSQL(
+  input: { metric_names: string[] },
+): ToolResult {
+  const { metric_names } = input;
+  if (!metric_names || metric_names.length === 0) {
+    return { result: 'No metric names provided.', isError: true };
+  }
+
+  const found = getMetricsByName(metric_names);
+  if (found.length === 0) {
+    return {
+      result: `No metrics found matching: ${metric_names.join(', ')}. Check the metric catalog in the system prompt for exact names.`,
+      isError: false,
+    };
+  }
+
+  const lines: string[] = [`Found ${found.length} metric(s):\n`];
+  for (const m of found) {
+    lines.push(`### ${m.name}`);
+    lines.push(`Description: ${m.description}`);
+    lines.push(`Kind: ${m.kind}`);
+    if (m.sourceName) lines.push(`Source: ${m.sourceName}`);
+    if (m.aggregation) lines.push(`Aggregation: ${m.aggregation}`);
+    if (m.valueColumn) lines.push(`Value column: ${m.valueColumn}`);
+    if (m.criteria && m.criteria.length > 0) {
+      lines.push(`Criteria: ${m.criteria.map((c) => `${c.column} ${c.condition} ${c.values.join(', ')}`).join(' AND ')}`);
+    }
+    if (m.sql) {
+      lines.push(`Backing SQL:\n\`\`\`sql\n${m.sql}\n\`\`\``);
+    }
+    lines.push('');
+  }
+
+  return { result: lines.join('\n'), isError: false };
 }
 
 // ── Formatting helpers ──
