@@ -816,11 +816,10 @@ export function getExploratorySystemPrompt(
 
 APPROACH:
 1. Review the metric catalog below FIRST. If any metrics match the user's question, call get_metric_sql to retrieve their full SQL definitions — this is your best starting point.
-2. Review the pre-loaded table metadata below to understand what's available.
-3. Use describe_table to inspect columns/types for tables you might query.
-4. Use run_exploratory_query to check DISTINCT values, date ranges, row counts, and data distributions BEFORE writing your final query.
-5. Once you understand the data well enough, call submit_final_query with your production-quality SQL.
-6. If the question is truly ambiguous, call ask_clarification.
+2. Review the pre-loaded table metadata below (includes columns and types). Only use describe_table if you need a table whose columns are NOT already listed.
+3. Use run_exploratory_query to check DISTINCT values, date ranges, row counts, and data distributions BEFORE writing your final query.
+4. Once you understand the data well enough, call submit_final_query with your production-quality SQL.
+5. If the question is truly ambiguous, call ask_clarification.
 
 Today's date is ${today}. When the user refers to relative time periods ("this month", "this quarter", "last year", "in March") without specifying a year, always assume the CURRENT year (${year}) or use CURRENT_DATE-based expressions.
 IMPORTANT: Always EXCLUDE today's date from actuals data pulls — today's data is always incomplete. Use \`CURRENT_DATE - INTERVAL '1' DAY\` as the upper bound. This does NOT apply to forecast tables, which may include future dates.

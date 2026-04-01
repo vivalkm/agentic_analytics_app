@@ -273,72 +273,83 @@ export function runAgentLoopV2(
           // Execute tool calls and collect results
           if (toolCalls.length === 0) break;
 
-          const toolResults: Anthropic.Messages.ToolResultBlockParam[] = [];
-
-          for (const tc of toolCalls) {
-            checkAborted();
+          // Parse inputs and emit tool_call events first
+          const parsed = toolCalls.map((tc) => {
             toolCallCount++;
-
             let input: Record<string, unknown>;
             try {
               input = JSON.parse(tc.inputJson);
             } catch {
               input = {};
             }
+            const step = toolCallCount;
+            emit(controller, { type: 'tool_call', step, tool: tc.name, input });
+            return { tc, input, step };
+          });
 
-            // Emit tool_call event
-            emit(controller, {
-              type: 'tool_call',
-              step: toolCallCount,
-              tool: tc.name,
-              input,
-            });
+          // Execute all tool calls in parallel
+          const settled = await Promise.allSettled(
+            parsed.map(async ({ tc, input, step }) => {
+              checkAborted();
+              const result = await executeTool(tc.name, input, abortController.signal);
 
-            // Execute the tool
-            const result = await executeTool(tc.name, input, abortController.signal);
-
-            // Emit tool_result event
-            const meta = result.metadata;
-            emit(controller, {
-              type: 'tool_result',
-              step: toolCallCount,
-              tool: tc.name,
-              result: result.result.slice(0, 500),
-              isError: result.isError,
-              executionTimeMs: meta?.type === 'query_result' ? meta.queryResult.executionTimeMs : undefined,
-              rowCount: meta?.type === 'query_result' ? meta.queryResult.rowCount : undefined,
-            });
-
-            // Handle special tools
-            if (tc.name === 'submit_final_query' && !result.isError && meta?.type === 'query_result') {
-              finalSQL = String(input.sql);
-              finalExplanation = String(input.explanation || '');
-              finalResults = meta.queryResult;
-
-              // Emit SQL and execution events (same as v1)
+              // Emit tool_result event
+              const meta = result.metadata;
               emit(controller, {
-                type: 'sql',
-                iteration: toolCallCount,
-                sql: finalSQL,
-                explanation: finalExplanation,
+                type: 'tool_result',
+                step,
+                tool: tc.name,
+                result: result.result.slice(0, 500),
+                isError: result.isError,
+                executionTimeMs: meta?.type === 'query_result' ? meta.queryResult.executionTimeMs : undefined,
+                rowCount: meta?.type === 'query_result' ? meta.queryResult.rowCount : undefined,
               });
-              emitExecution(controller, toolCallCount, finalResults);
-            }
 
-            if (tc.name === 'ask_clarification' && meta?.type === 'clarification') {
-              emit(controller, {
-                type: 'clarification',
-                content: meta.question,
+              // Handle special tools
+              if (tc.name === 'submit_final_query' && !result.isError && meta?.type === 'query_result') {
+                finalSQL = String(input.sql);
+                finalExplanation = String(input.explanation || '');
+                finalResults = meta.queryResult;
+
+                emit(controller, {
+                  type: 'sql',
+                  iteration: step,
+                  sql: finalSQL,
+                  explanation: finalExplanation,
+                });
+                emitExecution(controller, step, finalResults);
+              }
+
+              if (tc.name === 'ask_clarification' && meta?.type === 'clarification') {
+                emit(controller, { type: 'clarification', content: meta.question });
+                clarificationAsked = true;
+              }
+
+              return { tc, result };
+            }),
+          );
+
+          // Collect results in original order for the conversation history
+          const toolResults: Anthropic.Messages.ToolResultBlockParam[] = [];
+          for (let i = 0; i < parsed.length; i++) {
+            const s = settled[i];
+            if (s.status === 'fulfilled') {
+              toolResults.push({
+                type: 'tool_result',
+                tool_use_id: parsed[i].tc.id,
+                content: s.value.result.result,
+                is_error: s.value.result.isError || undefined,
               });
-              clarificationAsked = true;
+            } else {
+              // AbortError should propagate
+              if (s.reason instanceof DOMException && s.reason.name === 'AbortError') throw s.reason;
+              toolResults.push({
+                type: 'tool_result',
+                tool_use_id: parsed[i].tc.id,
+                content: `Tool execution failed: ${s.reason?.message || s.reason}`,
+                is_error: true,
+              });
             }
-
-            toolResults.push({
-              type: 'tool_result',
-              tool_use_id: tc.id,
-              content: result.result,
-              is_error: result.isError || undefined,
-            });
           }
 
           // Append tool results to messages
@@ -370,14 +381,17 @@ export function runAgentLoopV2(
         }
 
         // ── Phase 3: Analysis ──
-        if (finalResults && finalResults.rowCount > 0) {
+        // Note: finalResults is assigned inside Promise.allSettled callbacks,
+        // so TS control flow doesn't track it. We re-check at runtime.
+        const results = finalResults as QueryResult | null;
+        if (results && results.rowCount > 0) {
           checkAborted();
           emit(controller, { type: 'progress', content: 'Analyzing results...' });
 
           const analysisStream = await analyzeResults(
             question,
             finalSQL,
-            finalResults,
+            results,
             history,
           );
 
@@ -408,13 +422,13 @@ export function runAgentLoopV2(
           let validChartConfig = chartConfig;
 
           // Validate chart config keys against actual result columns
-          if (validChartConfig && validChartConfig.type !== 'none' && finalResults) {
-            const colSet = new Set(finalResults.columns.map((c) => c.toLowerCase()));
+          if (validChartConfig && validChartConfig.type !== 'none') {
+            const colSet = new Set(results.columns.map((c: string) => c.toLowerCase()));
             const xValid = colSet.has(validChartConfig.xKey.toLowerCase());
             const yValid = validChartConfig.yKeys.some((k) => colSet.has(k.toLowerCase()));
             if (!xValid || !yValid) {
               // Fall back to heuristic
-              validChartConfig = detectChartType(finalResults);
+              validChartConfig = detectChartType(results);
             }
           }
 

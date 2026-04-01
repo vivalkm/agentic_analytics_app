@@ -42,11 +42,30 @@ def stdout_to_stderr():
 
 
 def make_connection():
-    host = os.environ.get("TRINO_HOST", "https://lakehouse-router-prod.us-west-2.remitly.com")
+    raw_host = os.environ.get("TRINO_HOST", "https://lakehouse-router-prod.us-west-2.remitly.com")
     port = int(os.environ.get("TRINO_PORT", "443"))
     catalog = os.environ.get("TRINO_CATALOG", os.environ.get("TRINO_DEFAULT_CATALOG", "lakehouse"))
+
+    # Parse host: strip scheme if present, detect http_scheme from it
+    if raw_host.startswith("https://"):
+        host = raw_host[len("https://"):]
+        http_scheme = "https"
+    elif raw_host.startswith("http://"):
+        host = raw_host[len("http://"):]
+        http_scheme = "http"
+    else:
+        host = raw_host
+        http_scheme = "https" if port == 443 else "http"
+
     with stdout_to_stderr():
-        return connect(host=host, port=port, catalog=catalog, auth=OAuth2Authentication())
+        return connect(
+            host=host,
+            port=port,
+            catalog=catalog,
+            http_scheme=http_scheme,
+            auth=OAuth2Authentication(),
+            source="lakehouse-analytics",
+        )
 
 
 def execute_query(conn, sql):

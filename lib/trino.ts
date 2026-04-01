@@ -18,71 +18,106 @@ function getPython(): string {
 }
 
 // ---------------------------------------------------------------------------
-// Persistent Python process — singleton, HMR-safe via globalThis
+// Worker pool of persistent Python processes — HMR-safe via globalThis
 // ---------------------------------------------------------------------------
 
-interface TrinoProcess {
+const MAX_WORKERS = 5;
+const QUERY_TIMEOUT_MS = 300000;
+
+type QueryResult = { columns: string[]; columnTypes: string[]; rows: Record<string, unknown>[] };
+
+interface TrinoWorker {
   child: ChildProcess;
   rl: Interface;
   /** Currently waiting for a response */
   pending: {
-    resolve: (value: { columns: string[]; columnTypes: string[]; rows: Record<string, unknown>[] }) => void;
+    resolve: (value: QueryResult) => void;
     reject: (err: Error) => void;
     timer: ReturnType<typeof setTimeout>;
   } | null;
-  /** Queued requests waiting to be sent */
+}
+
+interface TrinoPool {
+  workers: TrinoWorker[];
+  /** Global queue — requests waiting for an available worker */
   queue: Array<{
     sql: string;
-    resolve: (value: { columns: string[]; columnTypes: string[]; rows: Record<string, unknown>[] }) => void;
+    resolve: (value: QueryResult) => void;
     reject: (err: Error) => void;
   }>;
 }
 
-const g = globalThis as unknown as { __trinoProcess?: TrinoProcess };
+const g = globalThis as unknown as { __trinoPool?: TrinoPool };
 
-function killProcess(): void {
-  const tp = g.__trinoProcess;
-  if (!tp) return;
-  if (tp.pending) {
-    tp.pending.reject(new Error('Trino process terminated'));
-    clearTimeout(tp.pending.timer);
+function getPool(): TrinoPool {
+  if (!g.__trinoPool) {
+    g.__trinoPool = { workers: [], queue: [] };
   }
-  for (const queued of tp.queue) {
-    queued.reject(new Error('Trino process terminated'));
-  }
-  tp.rl.close();
-  tp.child.kill();
-  g.__trinoProcess = undefined;
+  return g.__trinoPool;
 }
 
-function processNext(tp: TrinoProcess): void {
-  if (tp.pending || tp.queue.length === 0) return;
+function killWorker(worker: TrinoWorker): void {
+  if (worker.pending) {
+    worker.pending.reject(new Error('Trino worker terminated'));
+    clearTimeout(worker.pending.timer);
+    worker.pending = null;
+  }
+  worker.rl.close();
+  worker.child.kill();
+  const pool = getPool();
+  const idx = pool.workers.indexOf(worker);
+  if (idx >= 0) pool.workers.splice(idx, 1);
+}
 
-  const next = tp.queue.shift()!;
+/** Try to dispatch a queued request to an idle worker, or spawn a new one. */
+function dispatch(): void {
+  const pool = getPool();
+  if (pool.queue.length === 0) return;
+
+  // Find an idle worker
+  let worker = pool.workers.find((w) => !w.pending);
+
+  // No idle worker — spawn a new one if under limit
+  if (!worker && pool.workers.length < MAX_WORKERS) {
+    worker = spawnWorker();
+  }
+
+  if (!worker) return; // All busy and at max — request stays queued
+
+  const next = pool.queue.shift()!;
+  sendToWorker(worker, next.sql, next.resolve, next.reject);
+}
+
+function sendToWorker(
+  worker: TrinoWorker,
+  sql: string,
+  resolve: (value: QueryResult) => void,
+  reject: (err: Error) => void,
+): void {
   const timer = setTimeout(() => {
-    if (tp.pending) {
-      tp.pending.reject(new Error('Trino query timed out after 300s'));
-      tp.pending = null;
-      // Kill the process so next query gets a fresh connection
-      killProcess();
+    if (worker.pending) {
+      worker.pending.reject(new Error('Trino query timed out after 300s'));
+      worker.pending = null;
+      killWorker(worker);
+      dispatch(); // try queued requests on remaining workers
     }
-  }, 300000);
+  }, QUERY_TIMEOUT_MS);
 
-  tp.pending = { resolve: next.resolve, reject: next.reject, timer };
+  worker.pending = { resolve, reject, timer };
 
   try {
-    tp.child.stdin!.write(JSON.stringify({ sql: next.sql }) + '\n');
+    worker.child.stdin!.write(JSON.stringify({ sql }) + '\n');
   } catch (err) {
     clearTimeout(timer);
-    tp.pending = null;
-    next.reject(new Error(`Failed to write to Trino process: ${err}`));
-    killProcess();
+    worker.pending = null;
+    reject(new Error(`Failed to write to Trino worker: ${err}`));
+    killWorker(worker);
+    dispatch();
   }
 }
 
-function ensureProcess(): TrinoProcess {
-  if (g.__trinoProcess) return g.__trinoProcess;
-
+function spawnWorker(): TrinoWorker {
+  const pool = getPool();
   const scriptPath = join(process.cwd(), 'scripts', 'trino-query.py');
   const child = spawn(getPython(), [scriptPath], {
     stdio: ['pipe', 'pipe', 'pipe'],
@@ -90,14 +125,13 @@ function ensureProcess(): TrinoProcess {
   });
 
   const rl = createInterface({ input: child.stdout! });
-
-  const tp: TrinoProcess = { child, rl, pending: null, queue: [] };
+  const worker: TrinoWorker = { child, rl, pending: null };
 
   rl.on('line', (line: string) => {
-    if (!tp.pending) return;
-    const { resolve, reject, timer } = tp.pending;
+    if (!worker.pending) return;
+    const { resolve, reject, timer } = worker.pending;
     clearTimeout(timer);
-    tp.pending = null;
+    worker.pending = null;
 
     try {
       const result = JSON.parse(line);
@@ -114,61 +148,56 @@ function ensureProcess(): TrinoProcess {
       reject(new Error(`Failed to parse Trino output: ${line.slice(0, 200)}`));
     }
 
-    // Process next queued request
-    processNext(tp);
+    // Worker is now idle — dispatch next queued request
+    dispatch();
   });
 
   child.stderr!.on('data', (data: Buffer) => {
-    console.error('[trino]', data.toString().trim());
+    console.error(`[trino:${pool.workers.length}]`, data.toString().trim());
   });
 
   child.on('close', (code) => {
-    if (g.__trinoProcess === tp) {
-      // Reject any pending request
-      if (tp.pending) {
-        tp.pending.reject(new Error(`Trino process exited (code ${code})`));
-        clearTimeout(tp.pending.timer);
+    const idx = pool.workers.indexOf(worker);
+    if (idx >= 0) {
+      if (worker.pending) {
+        worker.pending.reject(new Error(`Trino worker exited (code ${code})`));
+        clearTimeout(worker.pending.timer);
+        worker.pending = null;
       }
-      // Reject queued requests
-      for (const queued of tp.queue) {
-        queued.reject(new Error(`Trino process exited (code ${code})`));
-      }
-      g.__trinoProcess = undefined;
+      pool.workers.splice(idx, 1);
+      dispatch(); // try queued requests on remaining workers
     }
   });
 
   child.on('error', (err) => {
-    console.error('[trino] Process error:', err.message);
-    if (g.__trinoProcess === tp) {
-      if (tp.pending) {
-        tp.pending.reject(new Error(`Trino process error: ${err.message}`));
-        clearTimeout(tp.pending.timer);
+    console.error('[trino] Worker error:', err.message);
+    const idx = pool.workers.indexOf(worker);
+    if (idx >= 0) {
+      if (worker.pending) {
+        worker.pending.reject(new Error(`Trino worker error: ${err.message}`));
+        clearTimeout(worker.pending.timer);
+        worker.pending = null;
       }
-      for (const queued of tp.queue) {
-        queued.reject(new Error(`Trino process error: ${err.message}`));
-      }
-      g.__trinoProcess = undefined;
+      pool.workers.splice(idx, 1);
+      dispatch();
     }
   });
 
-  g.__trinoProcess = tp;
-  return tp;
+  pool.workers.push(worker);
+  console.log(`[trino] Spawned worker ${pool.workers.length}/${MAX_WORKERS}`);
+  return worker;
 }
 
 /**
- * Execute a SQL query against Trino via the persistent Python process.
- * The first call spawns the process (triggers one OAuth browser popup).
- * Subsequent calls reuse the same connection.
+ * Execute a SQL query against Trino via the worker pool.
+ * The first call spawns a worker (triggers one OAuth browser popup).
+ * Concurrent calls use idle workers or spawn new ones (up to 5).
  */
-export async function executeTrinoMCP(sql: string): Promise<{
-  columns: string[];
-  columnTypes: string[];
-  rows: Record<string, unknown>[];
-}> {
+export async function executeTrinoMCP(sql: string): Promise<QueryResult> {
   return new Promise((resolve, reject) => {
-    const tp = ensureProcess();
-    tp.queue.push({ sql, resolve, reject });
-    processNext(tp);
+    const pool = getPool();
+    pool.queue.push({ sql, resolve, reject });
+    dispatch();
   });
 }
 
