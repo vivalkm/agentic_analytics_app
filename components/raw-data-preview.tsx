@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, memo } from 'react';
 import {
   Collapsible,
   CollapsibleContent,
@@ -25,7 +25,7 @@ function formatCellValue(value: unknown): string {
   return s.length > 50 ? s.substring(0, 47) + '...' : s;
 }
 
-export function RawDataPreview({ results, maxRows = 10 }: RawDataPreviewProps) {
+export const RawDataPreview = memo(function RawDataPreview({ results, maxRows = 10 }: RawDataPreviewProps) {
   const [open, setOpen] = useState(false);
 
   if (results.rowCount === 0) return null;
@@ -86,4 +86,4 @@ export function RawDataPreview({ results, maxRows = 10 }: RawDataPreviewProps) {
       </CollapsibleContent>
     </Collapsible>
   );
-}
+});

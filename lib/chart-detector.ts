@@ -243,19 +243,8 @@ export function detectChartType(result: QueryResult, question?: string): ChartCo
     };
   }
 
-  // --- 4. Bar chart: single categorical + numeric (general case) ---
-  if (categoricalCols.length >= 1 && numericCols.length >= 1 && rows.length >= 2) {
-    const relevantCols = filterRelevantColumns(numericCols, columns, question || '', 3);
-    const yKeys = relevantCols.map((i) => columns[i]);
-    return {
-      type: 'bar',
-      xKey: columns[categoricalCols[0]],
-      yKeys,
-      title: `${yKeys.join(', ')} by ${columns[categoricalCols[0]]}`,
-    };
-  }
-
-  // --- 5. Pie chart: only when 2-8 categories with a single metric ---
+  // --- 4. Pie chart: only when 2-8 categories with a single metric ---
+  // Must come before the general bar chart branch, which has strictly broader conditions
   if (
     categoricalCols.length >= 1 &&
     numericCols.length === 1 &&
@@ -272,6 +261,18 @@ export function detectChartType(result: QueryResult, question?: string): ChartCo
         title: `${columns[numericCols[0]]} by ${columns[catCol]}`,
       };
     }
+  }
+
+  // --- 5. Bar chart: single categorical + numeric (general case) ---
+  if (categoricalCols.length >= 1 && numericCols.length >= 1 && rows.length >= 2) {
+    const relevantCols = filterRelevantColumns(numericCols, columns, question || '', 3);
+    const yKeys = relevantCols.map((i) => columns[i]);
+    return {
+      type: 'bar',
+      xKey: columns[categoricalCols[0]],
+      yKeys,
+      title: `${yKeys.join(', ')} by ${columns[categoricalCols[0]]}`,
+    };
   }
 
   // --- 6. Line chart fallback: multiple numeric cols, no categories ---

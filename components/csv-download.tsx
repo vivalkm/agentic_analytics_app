@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, memo } from 'react';
 import { Download, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { QueryResult } from '@/lib/types';
@@ -10,25 +10,29 @@ interface CSVDownloadProps {
   filename?: string;
 }
 
-export function CSVDownload({ results, filename }: CSVDownloadProps) {
+export const CSVDownload = memo(function CSVDownload({ results, filename }: CSVDownloadProps) {
   const [downloading, setDownloading] = useState(false);
 
-  const handleDownload = useCallback(async () => {
+  const handleDownload = useCallback(() => {
     setDownloading(true);
     try {
-      const res = await fetch('/api/export', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          columns: results.columns,
-          rows: results.rows,
-          filename: filename || `export-${Date.now()}`,
-        }),
-      });
+      // Generate CSV client-side to avoid server round-trip
+      const escapeCsvField = (value: unknown): string => {
+        if (value === null || value === undefined) return '';
+        const s = String(value);
+        if (s.includes(',') || s.includes('"') || s.includes('\n')) {
+          return `"${s.replace(/"/g, '""')}"`;
+        }
+        return s;
+      };
 
-      if (!res.ok) throw new Error('Export failed');
+      const header = results.columns.map(escapeCsvField).join(',');
+      const rows = results.rows.map((row) =>
+        results.columns.map((col) => escapeCsvField(row[col])).join(',')
+      );
+      const csv = [header, ...rows].join('\n');
 
-      const blob = await res.blob();
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -60,4 +64,4 @@ export function CSVDownload({ results, filename }: CSVDownloadProps) {
       {results.rowCount} rows CSV
     </Button>
   );
-}
+});

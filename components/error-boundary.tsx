@@ -46,7 +46,17 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
             <Button
               variant="destructive"
               onClick={() => {
-                try { localStorage.clear(); } catch {}
+                try {
+                  // Only clear app-specific keys, not all localStorage
+                  const keysToRemove: string[] = [];
+                  for (let i = 0; i < localStorage.length; i++) {
+                    const key = localStorage.key(i);
+                    if (key?.startsWith('cortex-') || key?.startsWith('lakehouse-')) {
+                      keysToRemove.push(key);
+                    }
+                  }
+                  keysToRemove.forEach((k) => localStorage.removeItem(k));
+                } catch {}
                 window.location.reload();
               }}
             >

@@ -95,10 +95,6 @@ export function getMetadataCache(): MetadataCache | null {
   return getCache();
 }
 
-export function setMetadataCache(cache: MetadataCache): void {
-  setCache(cache);
-}
-
 export { isRefreshInProgress as isRefreshing };
 
 /**

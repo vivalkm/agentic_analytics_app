@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback, memo } from 'react';
 import {
   Collapsible,
   CollapsibleContent,
@@ -15,7 +15,7 @@ interface ThinkingStepProps {
   inProgress?: boolean;
 }
 
-export function ThinkingStep({
+export const ThinkingStep = memo(function ThinkingStep({
   content,
   collapsed: initialCollapsed,
   inProgress = false,
@@ -72,4 +72,4 @@ export function ThinkingStep({
       </CollapsibleContent>
     </Collapsible>
   );
-}
+});

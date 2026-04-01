@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useMemo, memo } from 'react';
 import {
   BarChart,
   Bar,
@@ -111,7 +111,7 @@ function pivotGroupedData(
   return { pivotedData, groupValues };
 }
 
-export function ChartRenderer({ config, results }: ChartRendererProps) {
+export const ChartRenderer = memo(function ChartRenderer({ config, results }: ChartRendererProps) {
   // Standard (non-grouped) data transformation
   const data = useMemo(() => {
     if (config.groupKey) return []; // handled by pivoted data
@@ -367,4 +367,4 @@ export function ChartRenderer({ config, results }: ChartRendererProps) {
       </ResponsiveContainer>
     </div>
   );
-}
+});

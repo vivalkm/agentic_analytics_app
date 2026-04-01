@@ -1,7 +1,7 @@
 'use client';
 
 import { APP_NAME, APP_DESCRIPTION } from '@/lib/constants';
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { ChatInput } from '@/components/chat-input';
 import { SQLEditor } from '@/components/sql-editor';
 import { AnalysisCard, renderMarkdown } from '@/components/analysis-card';
@@ -159,9 +159,13 @@ export default function Home() {
     if (saved.length > 0) setCells(saved);
   }, []);
 
-  // Save session on change
+  // Save session on change (debounced to avoid blocking main thread during streaming)
+  const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
-    if (cells.length > 0) saveSession(cells);
+    if (cells.length === 0) return;
+    if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+    saveTimeoutRef.current = setTimeout(() => saveSession(cells), 500);
+    return () => { if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current); };
   }, [cells]);
 
   // Track scroll position to decide auto-scroll behavior
@@ -594,20 +598,8 @@ export default function Home() {
             }
           }
         }
-        // Flush remaining bytes from decoder
+        // Flush remaining bytes from decoder (rare — NDJSON lines are newline-terminated)
         buffer += decoder.decode();
-        if (buffer.trim()) {
-          try {
-            const event: AgentEvent = JSON.parse(buffer.trim());
-            // Process the final event if valid — but this is rare;
-            // NDJSON lines are newline-terminated so buffer is usually empty
-            if (event.type === 'done') {
-              // handled below
-            }
-          } catch {
-            // incomplete JSON, ignore
-          }
-        }
 
         // Update analysis cell with final metadata (results, chart config, sql)
         if (analysisCellId && latestResultsCellId) {
@@ -737,7 +729,16 @@ export default function Home() {
     setStreamingSQL('');
   }, []);
 
-  const phaseConfig: Record<AgentPhase, { icon: typeof Loader2; text: string; color: string }> = {
+  // Precompute which agent runs have analysis cells (avoids O(n^2) in cells.map)
+  const completedRunIds = useMemo(
+    () => new Set(cells.filter((c) => c.type === 'analysis').map((c) => c.metadata?.agentRunId).filter(Boolean)),
+    [cells]
+  );
+
+  // Precompute whether any analysis cell exists (for export button)
+  const hasAnalysis = useMemo(() => cells.some((c) => c.type === 'analysis'), [cells]);
+
+  const phaseConfig = useMemo<Record<AgentPhase, { icon: typeof Loader2; text: string; color: string }>>(() => ({
     idle: { icon: Loader2, text: '', color: '' },
     generating: {
       icon: Sparkles,
@@ -753,9 +754,9 @@ export default function Home() {
       color: 'text-amber-400',
     },
     analyzing: { icon: CheckCircle2, text: 'Analyzing results...', color: 'text-green-400' },
-  };
+  }), [statusText]);
 
-  const sidebarContent = (
+  const sidebarContent = useMemo(() => (
     <Tabs defaultValue="schema" className="flex h-full flex-col">
       <TabsList className="mx-3 mt-3 shrink-0">
         <TabsTrigger value="schema">Schema</TabsTrigger>
@@ -778,7 +779,7 @@ export default function Home() {
         </ScrollArea>
       </TabsContent>
     </Tabs>
-  );
+  ), [handleInsertTable, handleUseQuery, schemaVersion]);
 
   return (
     <>
@@ -915,7 +916,7 @@ export default function Home() {
             </Tooltip>
 
             {/* Export analysis */}
-            {cells.some((c) => c.type === 'analysis') && (
+            {hasAnalysis && (
               <ExportAnalysis cells={cells} disabled={agentPhase !== 'idle'} />
             )}
 
@@ -1008,11 +1009,7 @@ export default function Home() {
                     defaultCollapsed={
                       // Collapse SQL once analysis is rendered for this run
                       !!cell.metadata?.agentRunId &&
-                      cells.some(
-                        (c) =>
-                          c.type === 'analysis' &&
-                          c.metadata?.agentRunId === cell.metadata?.agentRunId
-                      )
+                      completedRunIds.has(cell.metadata.agentRunId)
                     }
                   />
                 )}

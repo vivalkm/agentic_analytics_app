@@ -12,6 +12,7 @@ import {
   ChevronRight,
   Loader2,
   RefreshCw,
+  Play,
 } from 'lucide-react';
 
 interface QueryEntry {
@@ -162,9 +163,18 @@ function QueryCard({
   return (
     <div className="rounded-lg border border-sidebar-border p-2.5 space-y-2">
       <div className="flex items-start gap-2">
-        <p className="text-sm font-medium leading-snug text-sidebar-foreground">
+        <p className="flex-1 text-sm font-medium leading-snug text-sidebar-foreground">
           {entry.description}
         </p>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-6 w-6 shrink-0 text-muted-foreground hover:text-foreground"
+          onClick={onUse}
+          title="Run this query"
+        >
+          <Play className="h-3 w-3" />
+        </Button>
       </div>
 
       {entry.tags.length > 0 && (

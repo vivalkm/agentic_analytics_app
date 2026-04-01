@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useMemo, memo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 
 import { Button } from '@/components/ui/button';
@@ -203,7 +203,7 @@ export function renderMarkdown(text: string): string {
   return outputParts.join('\n');
 }
 
-export function AnalysisCard({
+export const AnalysisCard = memo(function AnalysisCard({
   analysis,
   streaming = false,
   onFollowUp,
@@ -255,4 +255,4 @@ export function AnalysisCard({
       </CardContent>
     </Card>
   );
-}
+});

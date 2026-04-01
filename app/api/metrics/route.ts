@@ -7,13 +7,21 @@ import {
 } from '@/lib/metric-catalog';
 
 export async function GET() {
-  ensureMetricsLoading();
+  try {
+    ensureMetricsLoading();
 
-  return Response.json({
-    metrics: getMetricCatalog(),
-    lastSynced: getLastSynced(),
-    isSyncing: isMetricSyncing(),
-  });
+    return Response.json({
+      metrics: getMetricCatalog(),
+      lastSynced: getLastSynced(),
+      isSyncing: isMetricSyncing(),
+    });
+  } catch (error) {
+    console.error('Metrics GET error:', error);
+    return Response.json(
+      { error: error instanceof Error ? error.message : 'Failed to load metrics' },
+      { status: 500 }
+    );
+  }
 }
 
 export async function POST() {

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useRef, useEffect, memo } from 'react';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { Play, Copy, Check, Pencil, X, ChevronRight, Code2 } from 'lucide-react';
@@ -16,7 +16,7 @@ interface SQLEditorProps {
   defaultCollapsed?: boolean;
 }
 
-export function SQLEditor({
+export const SQLEditor = memo(function SQLEditor({
   sql,
   onExecute,
   isExecuting,
@@ -144,4 +144,4 @@ export function SQLEditor({
       )}
     </div>
   );
-}
+});

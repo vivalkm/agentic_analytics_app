@@ -96,9 +96,14 @@ export function validateSQL(sql: string): SQLValidationResult {
         }
       }
     } catch (e) {
-      // Parser may not support all Trino syntax — log and allow simple cases.
-      // If the SQL contains suspicious patterns the parser couldn't verify, reject.
-      console.warn('[sql-validator] Parser failed, falling back to regex-only:', e instanceof Error ? e.message : e);
+      // Parser may not support all Trino syntax — reject to be safe.
+      // The regex pre-checks (Phases 1-2) already passed, but parser failure
+      // means we can't verify the AST. Fail closed rather than approving blindly.
+      console.warn('[sql-validator] Parser failed:', e instanceof Error ? e.message : e);
+      return {
+        valid: false,
+        error: 'Query syntax is too complex to validate. Please simplify or use standard SELECT/WITH syntax.',
+      };
     }
   }
 
