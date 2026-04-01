@@ -1,7 +1,8 @@
-import { writeFileSync, readFileSync, mkdirSync } from 'fs';
+import { writeFileSync, readFileSync, mkdirSync, renameSync } from 'fs';
 import { join } from 'path';
 import { QueryLibraryEntry } from './types';
 import { extractKeywords } from './stop-words';
+import { parseSqlHeader } from './sql-header';
 
 // --- Config ---
 
@@ -66,7 +67,9 @@ function loadCacheFromDisk(): GitHubQueryCache | null {
 function saveCacheToDisk(cache: GitHubQueryCache): void {
   try {
     mkdirSync(CACHE_DIR, { recursive: true });
-    writeFileSync(CACHE_FILE, JSON.stringify(cache), 'utf-8');
+    const tmp = CACHE_FILE + '.tmp';
+    writeFileSync(tmp, JSON.stringify(cache), 'utf-8');
+    renameSync(tmp, CACHE_FILE);
   } catch (e) {
     console.error('[github-queries] Failed to write disk cache:', e);
   }
@@ -154,77 +157,6 @@ async function fetchFileContent(config: RepoConfig, filePath: string): Promise<s
   return res.text();
 }
 
-/**
- * Parse a SQL file header for description and tags.
- * Supports both -- line comments and /* block comments.
- */
-function parseHeader(content: string): { description: string; tags: string[] } {
-  const lines = content.split('\n');
-  const descParts: string[] = [];
-  const tags: string[] = [];
-  let inDescription = false;
-  let inBlockComment = false;
-
-  for (const line of lines) {
-    const trimmed = line.trim();
-
-    // Track block comments
-    if (trimmed.startsWith('/*')) inBlockComment = true;
-    if (inBlockComment && trimmed.includes('*/')) {
-      inBlockComment = false;
-      continue;
-    }
-
-    // Process -- comments (inside or outside block comments)
-    if (trimmed.startsWith('--')) {
-      const comment = trimmed.slice(2).trim();
-
-      // Separator → end of header
-      if (/^-{4,}$/.test(comment)) break;
-
-      // Tags line
-      if (comment.toLowerCase().startsWith('tags:')) {
-        tags.push(
-          ...comment
-            .slice(5)
-            .split(',')
-            .map((t) => t.trim().toLowerCase())
-            .filter(Boolean)
-        );
-        continue;
-      }
-
-      // Description keyword
-      if (comment.toLowerCase() === 'description') {
-        inDescription = true;
-        continue;
-      }
-      if (comment.toLowerCase().startsWith('description:')) {
-        descParts.push(comment.slice(12).trim());
-        inDescription = true;
-        continue;
-      }
-
-      if (inDescription && comment) {
-        descParts.push(comment);
-      }
-
-      // Legacy fallback
-      if (!inDescription && comment && descParts.length === 0 && !comment.startsWith('=')) {
-        descParts.push(comment);
-        inDescription = true;
-      }
-
-      continue;
-    }
-
-    // If we hit actual SQL (not a comment, not empty), stop
-    if (!inBlockComment && trimmed && !trimmed.startsWith('/*')) break;
-  }
-
-  return { description: descParts.join(' ').trim(), tags };
-}
-
 // --- Public API ---
 
 export function getGitHubQueries(): QueryLibraryEntry[] {
@@ -267,7 +199,7 @@ async function fetchGitHubQueries(): Promise<QueryLibraryEntry[]> {
     const results = await Promise.allSettled(
       batch.map(async (file) => {
         const content = await fetchFileContent(config, file.path);
-        const { description, tags } = parseHeader(content);
+        const { description, tags } = parseSqlHeader(content);
         return {
           filename: `github:${file.name}`,
           description: description || file.name.replace('.sql', '').replace(/[-_]/g, ' '),

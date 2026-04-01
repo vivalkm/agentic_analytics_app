@@ -1,5 +1,6 @@
 import { QueryLibraryEntry } from './types';
 import { extractKeywords } from './stop-words';
+import { parseSqlHeader } from './sql-header';
 import fs from 'fs';
 import path from 'path';
 
@@ -38,7 +39,7 @@ export function loadQueryLibrary(): QueryLibraryEntry[] {
     for (const file of files) {
       const filePath = path.join(libraryDir, file);
       const header = readHeader(filePath);
-      const { description, tags } = parseHeaderComment(header);
+      const { description, tags } = parseSqlHeader(header);
 
       queryLibrary.push({
         filename: file,
@@ -103,65 +104,6 @@ function readHeader(filePath: string): string {
   }
 
   return headerLines.join('\n');
-}
-
-function parseHeaderComment(header: string): {
-  description: string;
-  tags: string[];
-} {
-  const lines = header.split('\n');
-  const descParts: string[] = [];
-  const tags: string[] = [];
-  let inDescription = false;
-
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (!trimmed.startsWith('--')) continue;
-
-    const comment = trimmed.slice(2).trim();
-
-    // Separator line — end of header
-    if (/^-{4,}$/.test(comment)) break;
-
-    // Tags line
-    if (comment.toLowerCase().startsWith('tags:')) {
-      tags.push(
-        ...comment
-          .slice(5)
-          .split(',')
-          .map((t) => t.trim().toLowerCase())
-          .filter(Boolean)
-      );
-      continue;
-    }
-
-    // "description" keyword starts the description block
-    if (comment.toLowerCase() === 'description') {
-      inDescription = true;
-      continue;
-    }
-
-    // Explicit "description: <text>" on one line (legacy format)
-    if (comment.toLowerCase().startsWith('description:')) {
-      descParts.push(comment.slice(12).trim());
-      inDescription = true;
-      continue;
-    }
-
-    // Accumulate description lines
-    if (inDescription && comment) {
-      descParts.push(comment);
-    }
-
-    // Legacy fallback: first non-empty comment becomes description
-    if (!inDescription && comment && descParts.length === 0 && !comment.startsWith('=')) {
-      descParts.push(comment);
-      inDescription = true;
-    }
-  }
-
-  const description = descParts.join(' ').trim();
-  return { description, tags };
 }
 
 const METADATA_SCORE_THRESHOLD = 5;

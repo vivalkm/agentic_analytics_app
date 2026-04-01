@@ -1,4 +1,5 @@
 import { loadQueryLibrary, getQuerySql } from '@/lib/query-matcher';
+import { apiError } from '@/lib/api-error';
 
 export async function GET() {
   try {
@@ -13,10 +14,6 @@ export async function GET() {
 
     return Response.json({ queries: withSql });
   } catch (error) {
-    console.error('Library load error:', error);
-    return Response.json(
-      { error: error instanceof Error ? error.message : 'Failed to load query library' },
-      { status: 500 }
-    );
+    return apiError('Library load error', error);
   }
 }

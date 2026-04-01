@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback } from 'react';
+import { escapeHtml } from '@/lib/escape-html';
 import { FileDown, FileText, Printer } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -146,10 +147,6 @@ const EXPORT_STYLES = `
   .header-icon { font-size: 1.5rem; }
   .timestamp { color: #9ca3af; font-size: 0.75rem; }
 `;
-
-function escapeHtml(text: string): string {
-  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
 
 function generateStandaloneHTML(runs: ExportableRun[]): string {
   const now = new Date().toLocaleString();

@@ -2,7 +2,7 @@
 
 import { useMemo, memo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-
+import { escapeHtml } from '@/lib/escape-html';
 import { Button } from '@/components/ui/button';
 import { Sparkles, Loader2, Play } from 'lucide-react';
 
@@ -90,14 +90,6 @@ function renderTable(tableLines: string[]): string {
 }
 
 /** Escape HTML entities to prevent XSS from LLM output */
-function escapeHtml(text: string): string {
-  return text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-}
-
 /** Apply inline formatting (bold, italic, code) — escapes HTML first */
 function inlineFormat(text: string): string {
   return escapeHtml(text)

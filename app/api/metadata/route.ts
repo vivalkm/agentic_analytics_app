@@ -8,6 +8,7 @@ import {
   waitForRefresh,
   waitForPrioritySchemas,
 } from '@/lib/metadata';
+import { apiError } from '@/lib/api-error';
 
 export async function GET() {
   try {
@@ -30,11 +31,7 @@ export async function GET() {
       tableCount: getAllTables().length,
     });
   } catch (error) {
-    console.error('Metadata GET error:', error);
-    return Response.json(
-      { error: error instanceof Error ? error.message : 'Failed to load metadata' },
-      { status: 500 }
-    );
+    return apiError('Metadata GET error', error);
   }
 }
 
@@ -62,10 +59,6 @@ export async function POST(request: Request) {
       isRefreshing: isRefreshing(),
     });
   } catch (error) {
-    console.error('Metadata refresh error:', error);
-    return Response.json(
-      { error: error instanceof Error ? error.message : 'Metadata refresh failed' },
-      { status: 500 }
-    );
+    return apiError('Metadata refresh error', error);
   }
 }

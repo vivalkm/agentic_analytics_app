@@ -1,4 +1,5 @@
 import { runAgentLoopV2 } from '@/lib/agent-loop-v2';
+import { apiError } from '@/lib/api-error';
 
 export async function POST(request: Request) {
   try {
@@ -44,10 +45,6 @@ export async function POST(request: Request) {
       },
     });
   } catch (error) {
-    console.error('Agent error:', error);
-    return Response.json(
-      { error: error instanceof Error ? error.message : 'Agent failed' },
-      { status: 500 }
-    );
+    return apiError('Agent error', error);
   }
 }

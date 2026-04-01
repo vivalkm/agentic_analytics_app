@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useMemo } from 'react';
 import { Collapsible } from '@base-ui/react/collapsible';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -14,6 +14,7 @@ import {
   RefreshCw,
   Play,
 } from 'lucide-react';
+import { useFetchOnce } from '@/hooks/use-fetch-once';
 
 interface QueryEntry {
   filename: string;
@@ -27,37 +28,14 @@ interface QueryLibraryProps {
 }
 
 export function QueryLibrary({ onUseQuery }: QueryLibraryProps) {
-  const [queries, setQueries] = useState<QueryEntry[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { data, loading, refetch } = useFetchOnce<{ queries: QueryEntry[] }>('/api/library');
+  const queries = useMemo(() => data?.queries ?? [], [data]);
   const [syncing, setSyncing] = useState(false);
   const [search, setSearch] = useState('');
-  const fetched = useRef(false);
-  const abortRef = useRef<AbortController | null>(null);
-
-  const fetchLibrary = () => {
-    abortRef.current?.abort();
-    const controller = new AbortController();
-    abortRef.current = controller;
-    fetch('/api/library', { signal: controller.signal })
-      .then((res) => res.json())
-      .then((data) => setQueries(data.queries || []))
-      .catch((e) => {
-        if (e instanceof DOMException && e.name === 'AbortError') return;
-      })
-      .finally(() => { setLoading(false); setSyncing(false); });
-  };
-
-  useEffect(() => {
-    if (fetched.current) return;
-    fetched.current = true;
-    fetchLibrary();
-    return () => { abortRef.current?.abort(); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   const handleSync = () => {
     setSyncing(true);
-    fetchLibrary();
+    refetch().finally(() => setSyncing(false));
   };
 
   const filtered = useMemo(() => {

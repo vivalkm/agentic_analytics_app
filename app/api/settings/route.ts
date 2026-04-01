@@ -1,4 +1,5 @@
 import { getAllSettings, writeEnvLocal, MANAGED_KEYS, getEnv } from '@/lib/env-config';
+import { apiError } from '@/lib/api-error';
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -40,10 +41,6 @@ export async function PUT(request: Request) {
       hasApiKey: Boolean(getEnv('ANTHROPIC_API_KEY')),
     });
   } catch (error) {
-    console.error('Settings update error:', error);
-    return Response.json(
-      { error: error instanceof Error ? error.message : 'Failed to update settings' },
-      { status: 500 }
-    );
+    return apiError('Settings update error', error);
   }
 }

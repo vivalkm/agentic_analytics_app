@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useMemo } from 'react';
 import { Collapsible } from '@base-ui/react/collapsible';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -16,6 +16,7 @@ import {
   Filter,
   ExternalLink,
 } from 'lucide-react';
+import { useFetchOnce } from '@/hooks/use-fetch-once';
 
 interface MetricEntry {
   id: string;
@@ -31,6 +32,12 @@ interface MetricEntry {
   metricType?: string;
 }
 
+interface MetricsResponse {
+  metrics: MetricEntry[];
+  lastSynced: string | null;
+  isSyncing: boolean;
+}
+
 /** Base URL including project ID, e.g. https://console.statsig.com/6cg6VdWIzlGm38eE3ePry2 */
 const STATSIG_CONSOLE_BASE = process.env.NEXT_PUBLIC_STATSIG_CONSOLE_URL || 'https://console.statsig.com';
 
@@ -39,46 +46,17 @@ function getStatsigUrl(metricName: string): string {
 }
 
 export function MetricsCatalog() {
-  const [metrics, setMetrics] = useState<MetricEntry[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { data, loading, refetch } = useFetchOnce<MetricsResponse>('/api/metrics');
+  const metrics = useMemo(() => data?.metrics ?? [], [data]);
+  const lastSynced = data?.lastSynced ?? null;
   const [syncing, setSyncing] = useState(false);
-  const [lastSynced, setLastSynced] = useState<string | null>(null);
   const [search, setSearch] = useState('');
-  const fetched = useRef(false);
-  const abortRef = useRef<AbortController | null>(null);
-
-  const fetchMetrics = () => {
-    abortRef.current?.abort();
-    const controller = new AbortController();
-    abortRef.current = controller;
-    fetch('/api/metrics', { signal: controller.signal })
-      .then((res) => res.json())
-      .then((data) => {
-        setMetrics(data.metrics || []);
-        setLastSynced(data.lastSynced || null);
-        setSyncing(data.isSyncing || false);
-      })
-      .catch((e) => {
-        if (e instanceof DOMException && e.name === 'AbortError') return;
-      })
-      .finally(() => setLoading(false));
-  };
-
-  useEffect(() => {
-    if (fetched.current) return;
-    fetched.current = true;
-    fetchMetrics();
-    return () => { abortRef.current?.abort(); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   const handleSync = async () => {
     setSyncing(true);
     try {
-      const res = await fetch('/api/metrics', { method: 'POST' });
-      const data = await res.json();
-      setMetrics(data.metrics || []);
-      setLastSynced(data.lastSynced || null);
+      await fetch('/api/metrics', { method: 'POST' });
+      await refetch();
     } catch {
       // ignore
     } finally {

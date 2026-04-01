@@ -1,3 +1,5 @@
+import { apiError } from '@/lib/api-error';
+
 export async function POST(request: Request) {
   try {
     const { columns, rows, filename } = await request.json();
@@ -33,10 +35,6 @@ export async function POST(request: Request) {
       },
     });
   } catch (error) {
-    console.error('Export error:', error);
-    return Response.json(
-      { error: error instanceof Error ? error.message : 'Export failed' },
-      { status: 500 }
-    );
+    return apiError('Export error', error);
   }
 }

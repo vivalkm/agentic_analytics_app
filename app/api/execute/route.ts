@@ -1,5 +1,6 @@
 import { validateSQL } from '@/lib/sql-validator';
 import { executeTrinoMCP } from '@/lib/trino';
+import { apiError } from '@/lib/api-error';
 
 export async function POST(request: Request) {
   try {
@@ -30,10 +31,6 @@ export async function POST(request: Request) {
       rowCount: result.rows.length,
     });
   } catch (error) {
-    console.error('Query execution error:', error);
-    return Response.json(
-      { error: error instanceof Error ? error.message : 'Query execution failed' },
-      { status: 500 }
-    );
+    return apiError('Query execution error', error);
   }
 }

@@ -5,6 +5,7 @@ import {
   triggerMetricSync,
   ensureMetricsLoading,
 } from '@/lib/metric-catalog';
+import { apiError } from '@/lib/api-error';
 
 export async function GET() {
   try {
@@ -16,11 +17,7 @@ export async function GET() {
       isSyncing: isMetricSyncing(),
     });
   } catch (error) {
-    console.error('Metrics GET error:', error);
-    return Response.json(
-      { error: error instanceof Error ? error.message : 'Failed to load metrics' },
-      { status: 500 }
-    );
+    return apiError('Metrics GET error', error);
   }
 }
 
@@ -33,9 +30,6 @@ export async function POST() {
       isSyncing: isMetricSyncing(),
     });
   } catch (error) {
-    return Response.json(
-      { error: error instanceof Error ? error.message : 'Sync failed' },
-      { status: 500 }
-    );
+    return apiError('Metric sync error', error);
   }
 }
