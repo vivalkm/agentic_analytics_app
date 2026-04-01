@@ -855,9 +855,9 @@ EXPLORATION GUIDELINES:
   // Add metric context
   const metrics = relevantMetrics ?? [];
   if (metrics.length > 0) {
-    prompt += '\n\nMatched metric definitions from Statsig catalog (priority 1):';
+    prompt += `\n\nMetric catalog from Statsig (${metrics.length} metrics — use these definitions when relevant):`;
     for (const m of metrics) {
-      prompt += `\n\n### ${m.name}\n${m.description}`;
+      let entry = `\n- **${m.name}**: ${m.description}`;
       if (m.kind === 'derived') {
         const agg = (m.aggregation || 'count').toUpperCase();
         const col = m.valueColumn || '*';
@@ -866,9 +866,9 @@ EXPLORATION GUIDELINES:
         if (m.criteria && m.criteria.length > 0) {
           formula += ` WHERE ${m.criteria.map((c) => `${c.column} ${c.condition} ${c.values.join(', ')}`).join(' AND ')}`;
         }
-        prompt += `\nDefinition: ${formula}`;
+        entry += ` [${formula}]`;
       }
-      if (m.sql) prompt += `\nBacking SQL:\n\`\`\`sql\n${m.sql}\n\`\`\``;
+      prompt += entry;
     }
   }
 

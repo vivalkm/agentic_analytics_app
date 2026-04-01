@@ -119,12 +119,13 @@ export function triggerMetricSync(force = false): Promise<void> {
 /**
  * Ensure metrics are loaded. Uses cache if available, triggers background sync if stale.
  */
-export function ensureMetricsLoading(): void {
+export function ensureMetricsLoading(): Promise<void> {
   if (!getMCache() && process.env.STATSIG_CONSOLE_API_KEY) {
-    triggerMetricSync();
+    return triggerMetricSync();
   } else if (isCacheStale() && process.env.STATSIG_CONSOLE_API_KEY) {
-    triggerMetricSync();
+    return triggerMetricSync();
   }
+  return Promise.resolve();
 }
 
 /**

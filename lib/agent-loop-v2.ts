@@ -19,7 +19,7 @@ import {
   ensureColumnsLoaded,
 } from './metadata';
 import { matchQueries, loadQueryLibrary, getQueryLibrary } from './query-matcher';
-import { matchMetrics, ensureMetricsLoading } from './metric-catalog';
+import { getMetricCatalog, ensureMetricsLoading } from './metric-catalog';
 import { matchGitHubQueries, ensureGitHubQueriesLoading } from './github-queries';
 import { detectChartType } from './chart-detector';
 
@@ -112,7 +112,7 @@ export function runAgentLoopV2(
         // ── Phase 0: Load context ──
         if (getQueryLibrary().length === 0) loadQueryLibrary();
         ensureMetadataLoading();
-        ensureMetricsLoading();
+        await ensureMetricsLoading();
         ensureGitHubQueriesLoading();
 
         // Block on priority schemas if no cache
@@ -130,7 +130,14 @@ export function runAgentLoopV2(
         let relevantTables = findRelevantTables(question);
         const relevantQueries = matchQueries(question, 5);
         const relevantGitHubQueries = matchGitHubQueries(question, 5);
-        const relevantMetrics = matchMetrics(question, 10);
+        const allMetrics = getMetricCatalog();
+
+        console.log('[agent] Context loaded:', {
+          tables: relevantTables.length,
+          queries: relevantQueries.length,
+          githubQueries: relevantGitHubQueries.length,
+          metrics: allMetrics.length,
+        });
 
         // If no tables AND no references, try forced refresh
         if (relevantTables.length === 0) {
@@ -149,7 +156,7 @@ export function runAgentLoopV2(
           }
 
           // Still nothing? Check if we at least have metric/query refs
-          if (relevantTables.length === 0 && relevantMetrics.length === 0 && relevantQueries.length === 0 && relevantGitHubQueries.length === 0) {
+          if (relevantTables.length === 0 && allMetrics.length === 0 && relevantQueries.length === 0 && relevantGitHubQueries.length === 0) {
             emit(controller, {
               type: 'needs_metadata',
               content: 'No table metadata is available for this question. Please refresh the schema metadata from the sidebar, then try again.',
@@ -171,7 +178,7 @@ export function runAgentLoopV2(
         // ── Phase 1: Build system prompt and messages ──
         const systemPrompt = getExploratorySystemPrompt(
           relevantTables,
-          relevantMetrics,
+          allMetrics,
           relevantQueries,
           relevantGitHubQueries,
         );
