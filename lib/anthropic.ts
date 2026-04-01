@@ -853,23 +853,20 @@ EXPLORATION GUIDELINES:
 - If an exploratory query returns an error, investigate and try a different approach
 - You typically need 2-5 exploratory queries before submitting the final answer`;
 
-  // Add metric context
+  // Add metric context — compact grouped list (names only, call get_metric_sql for details)
   const metrics = relevantMetrics ?? [];
   if (metrics.length > 0) {
-    prompt += `\n\nMetric catalog from Statsig (${metrics.length} metrics — use these definitions when relevant):`;
+    // Group metrics by sourceName
+    const grouped = new Map<string, string[]>();
     for (const m of metrics) {
-      let entry = `\n- **${m.name}**: ${m.description}`;
-      if (m.kind === 'derived') {
-        const agg = (m.aggregation || 'count').toUpperCase();
-        const col = m.valueColumn || '*';
-        let formula = `${agg}(${col})`;
-        if (m.sourceName) formula += ` FROM ${m.sourceName}`;
-        if (m.criteria && m.criteria.length > 0) {
-          formula += ` WHERE ${m.criteria.map((c) => `${c.column} ${c.condition} ${c.values.join(', ')}`).join(' AND ')}`;
-        }
-        entry += ` [${formula}]`;
-      }
-      prompt += entry;
+      const source = m.sourceName || 'Other';
+      if (!grouped.has(source)) grouped.set(source, []);
+      grouped.get(source)!.push(m.name);
+    }
+
+    prompt += `\n\nMetric catalog from Statsig (${metrics.length} metrics grouped by source). Call get_metric_sql with metric names to get full definitions:`;
+    for (const [source, names] of grouped) {
+      prompt += `\n- **${source}**: ${names.join(', ')}`;
     }
   }
 
