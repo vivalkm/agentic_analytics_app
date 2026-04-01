@@ -22,7 +22,9 @@ function getPython(): string {
 // ---------------------------------------------------------------------------
 
 const MAX_WORKERS = 5;
-const QUERY_TIMEOUT_MS = 300000;
+const QUERY_TIMEOUT_MS = 300_000;
+const IDLE_TIMEOUT_MS = 5 * 60_000; // Kill idle workers after 5 min
+const QUEUE_TIMEOUT_MS = 60_000;    // Reject queued requests after 60s waiting
 
 type QueryResult = { columns: string[]; columnTypes: string[]; rows: Record<string, unknown>[] };
 
@@ -35,6 +37,8 @@ interface TrinoWorker {
     reject: (err: Error) => void;
     timer: ReturnType<typeof setTimeout>;
   } | null;
+  /** Timer that kills the worker after IDLE_TIMEOUT_MS of inactivity */
+  idleTimer: ReturnType<typeof setTimeout> | null;
 }
 
 interface TrinoPool {
@@ -57,6 +61,8 @@ function getPool(): TrinoPool {
 }
 
 function killWorker(worker: TrinoWorker): void {
+  if (worker.idleTimer) clearTimeout(worker.idleTimer);
+  worker.idleTimer = null;
   if (worker.pending) {
     worker.pending.reject(new Error('Trino worker terminated'));
     clearTimeout(worker.pending.timer);
@@ -67,6 +73,17 @@ function killWorker(worker: TrinoWorker): void {
   const pool = getPool();
   const idx = pool.workers.indexOf(worker);
   if (idx >= 0) pool.workers.splice(idx, 1);
+}
+
+/** Reset the idle timer — call when a worker becomes idle. */
+function resetIdleTimer(worker: TrinoWorker): void {
+  if (worker.idleTimer) clearTimeout(worker.idleTimer);
+  worker.idleTimer = setTimeout(() => {
+    if (!worker.pending) {
+      console.log(`[trino] Killing idle worker (${IDLE_TIMEOUT_MS / 1000}s timeout)`);
+      killWorker(worker);
+    }
+  }, IDLE_TIMEOUT_MS);
 }
 
 /** Try to dispatch a queued request to an idle worker, or spawn a new one. */
@@ -94,6 +111,10 @@ function sendToWorker(
   resolve: (value: QueryResult) => void,
   reject: (err: Error) => void,
 ): void {
+  // Clear idle timer — worker is now busy
+  if (worker.idleTimer) clearTimeout(worker.idleTimer);
+  worker.idleTimer = null;
+
   const timer = setTimeout(() => {
     if (worker.pending) {
       worker.pending.reject(new Error('Trino query timed out after 300s'));
@@ -125,7 +146,7 @@ function spawnWorker(): TrinoWorker {
   });
 
   const rl = createInterface({ input: child.stdout! });
-  const worker: TrinoWorker = { child, rl, pending: null };
+  const worker: TrinoWorker = { child, rl, pending: null, idleTimer: null };
 
   rl.on('line', (line: string) => {
     if (!worker.pending) return;
@@ -148,7 +169,8 @@ function spawnWorker(): TrinoWorker {
       reject(new Error(`Failed to parse Trino output: ${line.slice(0, 200)}`));
     }
 
-    // Worker is now idle — dispatch next queued request
+    // Worker is now idle — start idle timer and dispatch next queued request
+    resetIdleTimer(worker);
     dispatch();
   });
 
@@ -196,7 +218,26 @@ function spawnWorker(): TrinoWorker {
 export async function executeTrinoMCP(sql: string): Promise<QueryResult> {
   return new Promise((resolve, reject) => {
     const pool = getPool();
-    pool.queue.push({ sql, resolve, reject });
+
+    // Queue timeout — reject if no worker picks this up within QUEUE_TIMEOUT_MS
+    const queueTimer = setTimeout(() => {
+      const idx = pool.queue.findIndex((q) => q.resolve === wrappedResolve);
+      if (idx >= 0) {
+        pool.queue.splice(idx, 1);
+        reject(new Error(`Trino queue timeout: no worker available after ${QUEUE_TIMEOUT_MS / 1000}s`));
+      }
+    }, QUEUE_TIMEOUT_MS);
+
+    const wrappedResolve = (value: QueryResult) => {
+      clearTimeout(queueTimer);
+      resolve(value);
+    };
+    const wrappedReject = (err: Error) => {
+      clearTimeout(queueTimer);
+      reject(err);
+    };
+
+    pool.queue.push({ sql, resolve: wrappedResolve, reject: wrappedReject });
     dispatch();
   });
 }

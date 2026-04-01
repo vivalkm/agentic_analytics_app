@@ -68,7 +68,10 @@ function setRefreshInProgress(v: boolean) { g.__metadataRefreshInProgress = v; }
  * TRINO_DEFAULT_CATALOG: catalog to introspect (default: "lakehouse")
  * TRINO_SKIP_SCHEMAS: comma-separated schemas to skip entirely (e.g. "sandbox,information_schema")
  */
-function getPriorityConfig() {
+// Lazy-cached: env vars don't change at runtime, no need to re-parse on every call
+let _priorityConfig: ReturnType<typeof _buildPriorityConfig> | null = null;
+
+function _buildPriorityConfig() {
   const prioritySchemas = (process.env.TRINO_PRIORITY_SCHEMAS || '')
     .split(',')
     .map((s) => s.trim().toLowerCase())
@@ -89,6 +92,11 @@ function getPriorityConfig() {
   const defaultCatalog = process.env.TRINO_DEFAULT_CATALOG || 'lakehouse';
 
   return { prioritySchemas, priorityTables, skipSchemas, defaultCatalog };
+}
+
+function getPriorityConfig() {
+  if (!_priorityConfig) _priorityConfig = _buildPriorityConfig();
+  return _priorityConfig;
 }
 
 export function getMetadataCache(): MetadataCache | null {
@@ -243,6 +251,19 @@ async function loadSchemaColumns(
   }
 }
 
+const SCHEMA_BATCH_SIZE = 4;
+
+/** Run async tasks in batches of `size` for bounded parallelism. */
+async function runBatched<T>(
+  items: T[],
+  size: number,
+  fn: (item: T) => Promise<unknown>
+): Promise<void> {
+  for (let i = 0; i < items.length; i += size) {
+    await Promise.allSettled(items.slice(i, i + size).map(fn));
+  }
+}
+
 async function refreshMetadata(): Promise<void> {
   const config = getPriorityConfig();
   console.log(
@@ -324,17 +345,17 @@ async function refreshMetadata(): Promise<void> {
       if (c) saveCacheToDisk(c);
     }
 
-    // --- Remaining schemas: Phase 1 — list all table names first (fast) ---
+    // --- Remaining schemas: Phase 1 — list all table names (batched parallel) ---
     console.log(`[metadata] Phase 1: listing table names for ${remaining.length} schemas...`);
-    for (const schema of remaining) {
-      await listSchemaTableNames(catalog, schema, catalogs, schemas, tables);
-    }
+    await runBatched(remaining, SCHEMA_BATCH_SIZE, (schema) =>
+      listSchemaTableNames(catalog, schema, catalogs, schemas, tables)
+    );
     console.log(`[metadata] Phase 1 done: ${tables.length} tables listed. Phase 2: loading columns...`);
 
-    // --- Remaining schemas: Phase 2 — bulk-load columns per schema ---
-    for (const schema of remaining) {
-      await loadSchemaColumns(catalog, schema, catalogs, schemas, tables);
-    }
+    // --- Remaining schemas: Phase 2 — bulk-load columns (batched parallel) ---
+    await runBatched(remaining, SCHEMA_BATCH_SIZE, (schema) =>
+      loadSchemaColumns(catalog, schema, catalogs, schemas, tables)
+    );
   }
 
   console.log(`[metadata] Refresh complete: ${tables.length} tables loaded`);

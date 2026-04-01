@@ -83,12 +83,13 @@ export async function fetchMetricSources(): Promise<MetricSource[]> {
     page++;
   }
 
+  const teamFilter = getMetricTeamFilter();
   const filtered = allSources.filter(
-    (s) => getMetricTeamFilter().has((s.team || '').toLowerCase())
+    (s) => teamFilter.has((s.team || '').toLowerCase())
   );
 
   console.log(
-    `[statsig] Fetched ${allSources.length} metric sources total, ${filtered.length} matching teams [${[...getMetricTeamFilter()].join(', ')}]`
+    `[statsig] Fetched ${allSources.length} metric sources total, ${filtered.length} matching teams [${[...teamFilter].join(', ')}]`
   );
 
   return filtered;

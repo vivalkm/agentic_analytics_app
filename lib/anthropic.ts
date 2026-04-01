@@ -21,16 +21,20 @@ function getDomainContext(): string {
 }
 
 const getClient = (() => {
-  const key = '__anthropic_client__';
+  const clientKey = '__anthropic_client__';
+  const configKey = '__anthropic_config__';
   return () => {
-    const g = globalThis as unknown as Record<string, Anthropic>;
-    if (!g[key]) {
-      g[key] = new Anthropic({
-        apiKey: getEnv('ANTHROPIC_API_KEY'),
-        baseURL: getEnv('ANTHROPIC_BASE_URL') || undefined,
-      });
+    const g = globalThis as unknown as Record<string, unknown>;
+    const apiKey = getEnv('ANTHROPIC_API_KEY');
+    const baseURL = getEnv('ANTHROPIC_BASE_URL') || undefined;
+    const prevConfig = g[configKey] as { apiKey: string; baseURL?: string } | undefined;
+
+    // Re-create client if API key or base URL changed (e.g., after .env.local edit + HMR)
+    if (!g[clientKey] || !prevConfig || prevConfig.apiKey !== apiKey || prevConfig.baseURL !== baseURL) {
+      g[clientKey] = new Anthropic({ apiKey, baseURL });
+      g[configKey] = { apiKey, baseURL };
     }
-    return g[key];
+    return g[clientKey] as Anthropic;
   };
 })();
 

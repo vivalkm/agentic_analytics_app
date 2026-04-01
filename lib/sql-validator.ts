@@ -23,6 +23,9 @@ const BLOCKED_REGEX = new RegExp(
   'i'
 );
 
+// Singleton parser — avoids re-constructing grammar tables on every call
+const parser = new Parser();
+
 export interface SQLValidationResult {
   valid: boolean;
   error?: string;
@@ -77,7 +80,6 @@ export function validateSQL(sql: string): SQLValidationResult {
   // Phase 3: SQL parser for SELECT/WITH (SHOW/DESCRIBE are Trino-specific)
   if (firstWord === 'SELECT' || firstWord === 'WITH') {
     try {
-      const parser = new Parser();
       const ast = parser.astify(cleanedSQL, { database: 'trino' });
       const statements = Array.isArray(ast) ? ast : [ast];
 
