@@ -702,6 +702,7 @@ export default function Home() {
   );
 
   const handleClearSession = () => {
+    if (cells.length > 0 && !window.confirm('Clear all cells and start a new session?')) return;
     setCells([]);
     saveSession([]);
   };

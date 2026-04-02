@@ -75,23 +75,26 @@ function saveCacheToDisk(cache: GitHubQueryCache): void {
   }
 }
 
-// --- In-memory state (survives HMR) ---
+// --- In-memory state (survives HMR via globalThis accessors) ---
 
-const g = globalThis as typeof globalThis & {
+interface GitHubQueryGlobals {
   __githubQueryCache?: GitHubQueryCache | null;
   __githubQuerySyncInProgress?: boolean;
   __githubQuerySyncPromise?: Promise<void> | null;
-};
-
-let cache: GitHubQueryCache | null = g.__githubQueryCache ?? loadCacheFromDisk();
-let syncInProgress = g.__githubQuerySyncInProgress ?? false;
-let syncPromise: Promise<void> | null = g.__githubQuerySyncPromise ?? null;
-
-function syncToGlobal() {
-  g.__githubQueryCache = cache;
-  g.__githubQuerySyncInProgress = syncInProgress;
-  g.__githubQuerySyncPromise = syncPromise;
 }
+const g = globalThis as typeof globalThis & GitHubQueryGlobals;
+
+// Initialize from disk on first load
+if (g.__githubQueryCache === undefined) {
+  g.__githubQueryCache = loadCacheFromDisk();
+}
+
+function getCache() { return g.__githubQueryCache ?? null; }
+function setCache(c: GitHubQueryCache | null) { g.__githubQueryCache = c; }
+function getSyncInProgress() { return g.__githubQuerySyncInProgress ?? false; }
+function setSyncInProgress(v: boolean) { g.__githubQuerySyncInProgress = v; }
+function getSyncPromise() { return g.__githubQuerySyncPromise ?? null; }
+function setSyncPromise(p: Promise<void> | null) { g.__githubQuerySyncPromise = p; }
 
 // --- GitHub API ---
 
@@ -160,20 +163,21 @@ async function fetchFileContent(config: RepoConfig, filePath: string): Promise<s
 // --- Public API ---
 
 export function getGitHubQueries(): QueryLibraryEntry[] {
-  return cache?.entries ?? [];
+  return getCache()?.entries ?? [];
 }
 
 export function getGitHubQueriesLastSynced(): string | null {
-  return cache?.lastSynced ?? null;
+  return getCache()?.lastSynced ?? null;
 }
 
 export function isGitHubQuerySyncing(): boolean {
-  return syncInProgress;
+  return getSyncInProgress();
 }
 
 function isCacheStale(): boolean {
-  if (!cache?.lastSynced) return true;
-  const age = Date.now() - new Date(cache.lastSynced).getTime();
+  const c = getCache();
+  if (!c?.lastSynced) return true;
+  const age = Date.now() - new Date(c.lastSynced).getTime();
   return age > STALE_THRESHOLD_MS;
 }
 
@@ -224,36 +228,35 @@ async function fetchGitHubQueries(): Promise<QueryLibraryEntry[]> {
  * Trigger a sync from GitHub. Returns immediately if already syncing.
  */
 export function triggerGitHubQuerySync(force = false): Promise<void> {
-  if (syncInProgress && syncPromise) return syncPromise;
+  if (getSyncInProgress() && getSyncPromise()) return getSyncPromise()!;
   if (!force && !isCacheStale()) return Promise.resolve();
   if (!process.env.QUERY_LIBRARY_REPO) return Promise.resolve();
 
-  syncInProgress = true;
-  syncToGlobal();
+  setSyncInProgress(true);
 
-  syncPromise = (async () => {
+  const promise = (async () => {
     try {
       const entries = await fetchGitHubQueries();
-      cache = { entries, lastSynced: new Date().toISOString() };
-      saveCacheToDisk(cache);
+      const newCache = { entries, lastSynced: new Date().toISOString() };
+      setCache(newCache);
+      saveCacheToDisk(newCache);
     } catch (e) {
       console.error('[github-queries] Sync failed:', e);
     } finally {
-      syncInProgress = false;
-      syncPromise = null;
-      syncToGlobal();
+      setSyncInProgress(false);
+      setSyncPromise(null);
     }
   })();
 
-  syncToGlobal();
-  return syncPromise;
+  setSyncPromise(promise);
+  return promise;
 }
 
 /**
  * Ensure GitHub queries are loading (non-blocking).
  */
 export function ensureGitHubQueriesLoading(): void {
-  if (!cache && process.env.QUERY_LIBRARY_REPO) {
+  if (!getCache() && process.env.QUERY_LIBRARY_REPO) {
     triggerGitHubQuerySync();
   } else if (isCacheStale() && process.env.QUERY_LIBRARY_REPO) {
     triggerGitHubQuerySync();

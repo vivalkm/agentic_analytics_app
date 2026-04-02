@@ -1,23 +1,28 @@
 import Anthropic from '@anthropic-ai/sdk';
-import { readFileSync } from 'fs';
+import { readFileSync, statSync } from 'fs';
 import { join } from 'path';
 import { TableMetadata, QueryResult, QueryLibraryEntry, MetricEntry, ConversationTurn, Attachment } from './types';
 import { getEnv } from './env-config';
 
-/** Load domain context file (cached via globalThis for HMR safety). */
+/** Load domain context file (cached via globalThis, re-reads when file mtime changes). */
 const _DC_KEY = '__domain_context__';
+const _DC_MTIME_KEY = '__domain_context_mtime__';
 function getDomainContext(): string {
-  const g = globalThis as unknown as Record<string, string>;
-  if (g[_DC_KEY] !== undefined) return g[_DC_KEY];
+  const g = globalThis as unknown as Record<string, string | number>;
+  const filePath = join(process.cwd(), 'domain-context.md');
+
   try {
-    g[_DC_KEY] = readFileSync(
-      join(process.cwd(), 'domain-context.md'),
-      'utf-8'
-    ).trim();
+    const mtime = statSync(filePath).mtimeMs;
+    if (g[_DC_KEY] !== undefined && g[_DC_MTIME_KEY] === mtime) {
+      return g[_DC_KEY] as string;
+    }
+    g[_DC_KEY] = readFileSync(filePath, 'utf-8').trim();
+    g[_DC_MTIME_KEY] = mtime;
   } catch {
     g[_DC_KEY] = '';
+    g[_DC_MTIME_KEY] = 0;
   }
-  return g[_DC_KEY];
+  return g[_DC_KEY] as string;
 }
 
 const getClient = (() => {

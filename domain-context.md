@@ -12,8 +12,8 @@ Terms defined here override any assumptions the LLM might make.
 - **reporting_group**: A region-to-region pair (e.g. "USA-MEX", "CAN-IND", "MEA-CAN"). Each reporting_group contains one or more corridors. When a user asks about a "region" or "reporting group", use `reporting_group`.
 - **corridor**: A country-to-country pair within a reporting_group. More granular than reporting_group. When a user asks about a specific "corridor" or "country pair", use the corridor column (e.g. `send_country`, `receive_country`, or a corridor-specific column depending on the table).
 - **Rewire**: A non-core product (acquired company). All Rewire transactions are sent from Israel (ISR), and all ISR send volume is Rewire. `txn_is_core = TRUE` already excludes Rewire. When filtering FOR Rewire, use one of these (MUST use the complete filter, not partial):
-  - **Simplest**: `corridor_key LIKE 'ISR-%'`
-  - **On `fpa.transaction_economics`**: `txn_is_migrated_rewire = TRUE AND transaction_remittance_distro_id = 'app_id_ra_ril'` (BOTH conditions required together)
+  - **Method 1**: On `fpa.transaction_economics`, use filter `transaction_corridor_key LIKE 'ISR-%'`
+  - **Method 2**, On `fpa.transaction_economics`, use both filters together `txn_is_migrated_rewire = TRUE AND transaction_remittance_distro_id = 'app_id_ra_ril'` (BOTH conditions required together)
   - **Data caveat**: Rewire transaction data in Lakehouse is incomplete before 2026-01-01. If the user asks about Rewire data prior to January 2026, warn them that results may be incomplete or missing.
 
 ## Default Core Remittance Filters
