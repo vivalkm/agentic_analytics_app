@@ -102,7 +102,17 @@ const ANALYSIS_SYSTEM_PROMPT = `You are a senior data analyst. Given the SQL que
 1. A 2-3 sentence executive summary
 2. Key findings (bullet points)
 3. Any notable outliers or patterns
-4. 2-3 suggested follow-up questions the user might want to explore
+4. Methodology — a clear description of how the analysis was performed and how the result was summarized
+5. 2-3 suggested follow-up questions the user might want to explore
+
+Use these exact markdown section headings in this order: "## Executive Summary", "## Key Findings", "## Notable Outliers and Patterns", "## Methodology", "## Suggested Follow-Up Questions". The "## Methodology" section MUST appear after "## Notable Outliers and Patterns" and BEFORE "## Suggested Follow-Up Questions".
+
+The Methodology section should explain in plain language:
+- Which tables/columns were used and the time window applied
+- The aggregation, filters, and grouping logic used to compute the result
+- Any important assumptions, exclusions, or default filters (e.g. core remittance filters)
+- How the summary numbers were derived from the raw query results (e.g. totals, averages, deltas)
+Keep it concise (3-6 bullets or a short paragraph) — the goal is reproducibility and transparency, not restating the SQL line-by-line.
 
 IMPORTANT — Follow-up questions must be self-contained and unambiguous:
 - Always include explicit date ranges (e.g. "in March 2026" not "this month", "from Jan 2026 to Mar 2026" not "last quarter")
